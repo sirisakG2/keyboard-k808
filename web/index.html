@@ -34,7 +34,7 @@ details{margin-top:6px}pre{background:#0f1115;color:#9fe3a9;padding:12px;border-
 </style></head><body><div class="wrap">
 <header>
   <div><h1>K808 Configurator</h1><span id="status" class="chip">Not connected</span></div>
-  <div><button id="connect" class="primary">Connect keyboard</button></div>
+  <div><button id="connect" class="primary">Connect keyboard</button> <button id="disconnect" disabled>Disconnect</button></div>
 </header>
 
 <div id="support" class="banner bad" hidden>This browser can't talk to USB keyboards. Use Chrome or Edge on a computer.</div>
@@ -51,7 +51,8 @@ details{margin-top:6px}pre{background:#0f1115;color:#9fe3a9;padding:12px;border-
       <button id="defaults" disabled>Vendor defaults</button>
       <button id="apply" class="primary" disabled>Apply to keyboard</button>
     </div>
-    <p class="mute" style="margin-bottom:0">After applying, unplug the keyboard for 5 seconds and plug it back in. A backup file is saved first.</p>
+    <label class="mute" style="display:block;margin-top:8px"><input id="autoDisc" type="checkbox" checked> Disconnect automatically after Apply</label>
+    <p class="mute" style="margin-bottom:0">A backup file is saved before writing. If keys stop typing after Apply, press Disconnect; if they still don't work, unplug and replug.</p>
   </section>
 
   <section class="card">
@@ -241,18 +242,29 @@ async function loadKeys() {
 }
 async function connect() {
   try {
-    const devs = await navigator.hid.requestDevice({ filters: [{ vendorId: 0x30fa, productId: 0x2350 }] });
+    let devs = (await navigator.hid.getDevices()).filter(d => d.vendorId === 0x30fa && d.productId === 0x2350);
+    if (!devs.length) devs = await navigator.hid.requestDevice({ filters: [{ vendorId: 0x30fa, productId: 0x2350 }] });
     if (!devs.length) return;
     dev = devs[0]; if (!dev.opened) await dev.open();
     const col = dev.collections.find(c => c.usagePage === 0xff01);
-    if (!col) { dev = null; return note('bad', 'This device has no 0xFF01 interface. Is it the K808?'); }
+    if (!col) { await disconnect(true); return note('bad', 'This device has no 0xFF01 interface. Is it the K808?'); }
     featLen = featureDataLength(col);
-    if (featLen < 7) { dev = null; return note('bad', 'Unexpected report size ' + featLen); }
+    if (featLen < 7) { await disconnect(true); return note('bad', 'Unexpected report size ' + featLen); }
     $('status').textContent = 'Connected: ' + (dev.productName || 'keyboard'); $('status').className = 'chip on';
+    $('connect').disabled = true; $('disconnect').disabled = false;
     log('Connected, feature report length ' + featLen);
     refreshButtons(); await loadKeys();
   } catch (e) { note('bad', 'Connect failed: ' + e.message); log('Error: ' + e.message); }
 }
+async function disconnect(silent) {
+  try { if (dev && dev.opened) await dev.close(); } catch (e) { log('Close error: ' + e.message); }
+  dev = null;
+  $('status').textContent = 'Not connected'; $('status').className = 'chip';
+  $('connect').disabled = false; $('disconnect').disabled = true;
+  if (!silent) note('ok', 'Disconnected. Try typing on the keyboard. To change keys again, press Connect (no popup needed).');
+  refreshButtons();
+}
+$('disconnect').onclick = () => disconnect(false);
 $('connect').onclick = connect;
 $('load').onclick = loadKeys;
 $('revert').onclick = () => { current = { ...original }; note('', ''); drawPad(); drawPicker(); refreshButtons(); };
@@ -278,9 +290,10 @@ async function doApply() {
       log(`Key ${r[1]} (#${k}): 0x${h2(original[k])} -> 0x${h2(current[k])} read back 0x${h2(got)}`);
       if (got === current[k]) original[k] = got; else bad++;
     }
-    note(bad ? 'bad' : 'ok', bad ? `${bad} key(s) did not verify. Use "Undo unsaved" or restore from your backup.` : 'Saved. Now unplug the keyboard for 5 seconds and plug it back in.');
+    note(bad ? 'bad' : 'ok', bad ? `${bad} key(s) did not verify. Use "Undo unsaved" or restore from your backup.` : 'Saved.');
   } catch (e) { note('bad', 'Write failed: ' + e.message); log('Error: ' + e.message); }
   drawPad(); setBusy(false);
+  if ($('autoDisc').checked) { await disconnect(true); const n = $('note'); n.textContent += ' Keyboard disconnected from this page; test typing now. If keys still do not type, unplug and replug once.'; }
 }
 $('apply').onclick = doApply;
 $('bfile').onchange = async ev => {
@@ -384,5 +397,6 @@ $('pimport').onchange = async ev => {
 
 // ---------- start ----------
 if (!('hid' in navigator)) { $('support').hidden = false; $('connect').disabled = true; }
+if ('hid' in navigator) navigator.hid.addEventListener('disconnect', e => { if (dev && e.device === dev) disconnect(true); });
 drawPad(); drawPicker(); drawProfiles(); refreshButtons();
 </script></body></html>
