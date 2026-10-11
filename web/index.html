@@ -31,6 +31,13 @@ pre{background:#111;color:#0f0;padding:1rem;min-height:8rem;overflow:auto;white-
 <br><button id="dump">Dump</button>
 </fieldset>
 
+<fieldset id="layoutBox" disabled>
+<legend>4. Key layout (read only)</legend>
+<p>Reads the two key tables found in the dump (at 0x0020 and 0x0128) and shows key names. Also lets you save a backup file of the whole dump.</p>
+<button id="layout">Show key layout</button>
+<button id="backup">Download backup (full dump 0x0000-0x03ff)</button>
+</fieldset>
+
 <pre id="log"></pre>
 <script>
 const logEl = document.getElementById('log');
@@ -89,6 +96,7 @@ document.getElementById('connect').onclick = async () => {
     if (featLen < 7) return log('Report too short for the known packet format (needs 7+). Send this text to Claude.');
     document.getElementById('readBox').disabled = false;
     document.getElementById('dumpBox').disabled = false;
+    document.getElementById('layoutBox').disabled = false;
   } catch (e) { log('Error: ' + e.message); }
 };
 
@@ -121,6 +129,43 @@ document.getElementById('dump').onclick = async () => {
     const hit = hexAll.indexOf('1e1f20212228262524232735');
     log(hit >= 0 ? `Default key layout found at ${hex(from + hit / 2)}` : 'Default key layout not found in this range.');
     log('Done.');
+  } catch (e) { log('Error: ' + e.message); }
+};
+</script>
+<script>
+const NAMES = { 0x28: 'Enter', 0x29: 'Esc', 0x2a: 'Backspace', 0x2b: 'Tab', 0x2c: 'Space', 0x35: '`',
+  0x4f: 'Right', 0x50: 'Left', 0x51: 'Down', 0x52: 'Up', 0x58: 'KP Enter', 0x63: 'KP .', 0xff: '(none)' };
+for (let i = 0; i < 26; i++) NAMES[0x04 + i] = String.fromCharCode(65 + i);
+'1234567890'.split('').forEach((c, i) => NAMES[0x1e + i] = c);
+for (let i = 0; i < 9; i++) NAMES[0x59 + i] = 'KP ' + (i + 1);
+NAMES[0x62] = 'KP 0';
+['LCtrl', 'LShift', 'LAlt', 'LWin', 'RCtrl', 'RShift', 'RAlt', 'RWin'].forEach((n, i) => NAMES[0xe0 + i] = n);
+const nm = c => NAMES[c] || ('0x' + h2(c));
+const KEYS = 14, STRIDE = 8, LAYERS = { 'table @0x0020': 0x20, 'table @0x0128': 0x128 };
+let lastDump = null;
+
+async function readTable(base) {
+  const out = [];
+  for (let k = 0; k < KEYS; k++) out.push((await readBlock(base + k * STRIDE, 1, 0))[0]);
+  return out;
+}
+document.getElementById('layout').onclick = async () => {
+  try {
+    const t = {};
+    for (const [name, base] of Object.entries(LAYERS)) t[name] = await readTable(base);
+    log('key#  ' + Object.keys(t).join('   |   '));
+    for (let k = 0; k < KEYS; k++) log(String(k).padStart(2) + '    ' + Object.values(t).map(v => nm(v[k]).padEnd(10)).join(' | '));
+    log('Done.');
+  } catch (e) { log('Error: ' + e.message); }
+};
+document.getElementById('backup').onclick = async () => {
+  try {
+    log('Reading full backup 0x0000-0x03ff...');
+    const bytes = [];
+    for (let a = 0; a < 0x400; a += 8) bytes.push(...await readBlock(a, 8, 0));
+    const blob = new Blob([JSON.stringify({ vid: 0x30fa, pid: 0x2350, start: 0, hex: bytes.map(h2).join('') })], { type: 'application/json' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'k808-backup.json'; a.click();
+    log('Backup downloaded: k808-backup.json. Keep this file.');
   } catch (e) { log('Error: ' + e.message); }
 };
 </script></body></html>
