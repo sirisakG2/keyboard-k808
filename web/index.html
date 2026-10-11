@@ -137,6 +137,7 @@ a{color:var(--cyan)}
       <p><label class="mute"><input id="backupChk" type="checkbox" checked> Download a backup file on the first save each visit</label><br>
       <label class="mute"><input id="autoDisc" type="checkbox" checked> Disconnect automatically after saving</label></p>
       <p><button id="wake" class="tbtn">Unfreeze keyboard</button> <label class="mute">Restore keys from a backup file <input id="bfile" type="file" accept=".json"></label></p>
+      <p><button id="ffStart" class="tbtn">Find what freezes the keyboard</button></p>
       <p><a href="advanced.html">Advanced page</a> (key test, calibration) &middot; <a href="dev.html">Developer tools</a></p>
       <details><summary>Log</summary><pre id="log"></pre></details>
     </details>
@@ -161,6 +162,18 @@ a{color:var(--cyan)}
       </div>
     </div>
     <div class="box"><div><button id="ok" class="round" title="Save to keyboard">&#10003;</button><button id="cancel" class="round x" title="Undo unsaved changes">&#10005;</button></div></div>
+  </div>
+</div>
+
+<div id="ff" class="modalBg" hidden>
+  <div class="modal" style="grid-template-columns:1fr;max-width:560px">
+    <button class="close" id="ffClose">&times;</button>
+    <div class="mainArea">
+      <h3 style="margin-top:0">Find what freezes the keyboard</h3>
+      <p class="mute">I do one step of a save at a time. After each step, press <b>any key on the K808</b> (for example 5). If no key arrives within 10 seconds, that step froze it. Nothing on your keyboard is changed: the write step writes the same value back.</p>
+      <div id="ffMsg" style="font-size:1.15rem;font-weight:700;margin:14px 0"></div>
+      <pre id="ffOut"></pre>
+    </div>
   </div>
 </div>
 
@@ -464,6 +477,43 @@ $('cfgFile').onchange = async ev => {
     for (const c of (j.profiles || [])) if (c.name && c.keys) upsertCfg(c, false);
     note('ok', 'Configurations imported.');
   } catch (e) { note('bad', 'Import failed: ' + e.message); }
+};
+
+// ---------- freeze finder ----------
+function waitKey(ms) {
+  return new Promise(res => {
+    const h = e => { e.preventDefault(); clearTimeout(t); window.removeEventListener('keydown', h, true); res(e.code); };
+    const t = setTimeout(() => { window.removeEventListener('keydown', h, true); res(null); }, ms);
+    window.addEventListener('keydown', h, true);
+  });
+}
+$('ffClose').onclick = () => { $('ff').hidden = true; };
+$('ffStart').onclick = async () => {
+  if (!dev || original[4] === undefined) return note('', 'Connect the keyboard first (keys must show on the picture).');
+  $('ff').hidden = false; const out = $('ffOut'), msg = $('ffMsg'); out.textContent = '';
+  const k = 4, addr = T2 + k * 8, same = original[k];
+  const steps = [
+    ['connected, nothing sent', async () => {}],
+    ['read one key', async () => { await readBlock(addr, 1); }],
+    ['begin packet (07 09 41 00)', async () => { await beginWrite(); }],
+    ['write same value to key 5', async () => { await writeByteRaw(addr, same); }],
+    ['finish (0x11, 0)', async () => { await finishWrite(); }],
+    ['read back', async () => { await sleep(500); await readBlock(addr, 1); }],
+    ['close connection', async () => { if (dev && dev.opened) await dev.close(); }],
+  ];
+  setBusy(true);
+  for (let i = 0; i < steps.length; i++) {
+    const [name, fn] = steps[i];
+    try { await fn(); } catch (e) { out.textContent += `${i}. ${name}: ERROR ${e.message}\n`; log('Freeze finder error: ' + e.message); }
+    msg.textContent = `Step ${i + 1} of ${steps.length} done (${name}). Now press any key on the K808...`;
+    const code = await waitKey(10000);
+    out.textContent += `${i}. ${name}: ${code ? 'keys work (' + code + ')' : 'NO KEY - frozen'}\n`;
+    log(`Freeze finder ${i}. ${name}: ${code || 'frozen'}`);
+    if (!code) { msg.textContent = `The keyboard stopped after: "${name}". Unplug and replug it, then click "Copy debug report" and paste it to Claude.`; break; }
+    if (i === steps.length - 1) msg.textContent = 'The keyboard kept working through every step. Click "Copy debug report" and paste it to Claude.';
+  }
+  dev = null; $('status').textContent = 'Not connected'; $('status').className = 'chip';
+  setBusy(false);
 };
 
 // ---------- tabs ----------
