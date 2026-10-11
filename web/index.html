@@ -24,6 +24,8 @@ button:disabled{opacity:.45;cursor:not-allowed}
 .key small{font-size:.7rem;opacity:.7}.key b{font-size:1.05rem;word-break:break-all}
 .key.red{background:var(--k1);color:#fff}.key.yellow{background:var(--k3)}
 .key.target{outline:4px solid #00e5ff;animation:pulse 1s infinite}@keyframes pulse{50%{outline-color:transparent}}
+.key.lit{background:#00e5ff!important;color:#00323a!important;box-shadow:0 0 18px 6px #00e5ff;animation:glow 1s infinite}@keyframes glow{50%{box-shadow:0 0 4px 1px #00e5ff}}
+.key.dim{opacity:.35}
 .key.changed{outline:3px solid var(--changed)}.key.sel{border-color:#fff;box-shadow:0 0 0 3px var(--accent)}
 .knob{grid-column:1;grid-row:3;align-self:end;justify-self:start;width:52px;height:52px;border-radius:50%;background:radial-gradient(#d8dbe0,#8d929c);border:0;margin:0 0 4px 4px;padding:0;font-size:.65rem;color:#222}
 .groups button{margin:2px;padding:.3rem .6rem;font-size:.9rem}
@@ -78,9 +80,10 @@ details{margin-top:6px}pre{background:#0f1115;color:#9fe3a9;padding:12px;border-
 <section class="card">
   <h2 style="margin:0 0 6px;font-size:1.05rem">Test my keys</h2>
   <p class="mute" style="margin-top:0">Checks that each physical key types what this page shows. Nothing is written to the keyboard.</p>
-  <ol class="mute" style="margin:4px 0 8px;padding-left:20px"><li>Connect the keyboard (keys appear above).</li><li>Click <b>Start test</b>.</li><li>Press the <b style="color:#00a5bd">glowing</b> key on your real keyboard. 12 times.</li></ol>
+  <ol class="mute" style="margin:4px 0 8px;padding-left:20px"><li>Connect the keyboard (keys appear above).</li><li>Click <b>Start test</b>.</li><li>A small keyboard picture appears below. Press the <b style="color:#00a5bd">glowing</b> key on your real keyboard. 12 times.</li></ol>
   <div class="row" style="margin-top:0"><button id="lcStart">Start test</button><button id="lcUse" disabled>Fix the picture to match my keyboard</button></div>
   <p id="lcMsg" style="font-weight:600;margin:8px 0 0"></p>
+  <div id="lcPad" class="pad" style="grid-template-rows:repeat(3,54px);max-width:420px;margin:8px 0" hidden></div>
   <div id="lcRes"></div>
   <details><summary>Technical details</summary><pre id="lcOut" style="max-height:220px"></pre></details>
 </section>
@@ -462,6 +465,19 @@ CODEMAP[0x27] = 'Digit0';
 for (let i = 0; i < 12; i++) CODEMAP[0x3a + i] = 'F' + (i + 1);
 const USAGE_OF = {}; for (const [u, c] of Object.entries(CODEMAP)) USAGE_OF[c] = parseInt(u, 10);
 let lcFound = null, lcTarget = null;
+function drawMini() {
+  const m = $('lcPad'); m.innerHTML = '';
+  if (lcTarget === null) { m.hidden = true; return; }
+  m.hidden = false;
+  for (const [k, label, col, row, cs, rs, color] of PHYS) {
+    const d = document.createElement('div');
+    d.className = 'key ' + color + (lcTarget === label ? ' lit' : ' dim');
+    d.style.cssText = `grid-column:${col}/span ${cs};grid-row:${row}/span ${rs}`;
+    d.innerHTML = `<b>${label}</b>`;
+    m.appendChild(d);
+  }
+}
+
 $('lcStart').onclick = async () => {
   const out = $('lcOut'), msg = $('lcMsg'), res = $('lcRes'); out.textContent = ''; res.innerHTML = ''; lcFound = null; $('lcUse').disabled = true;
   if (!dev || !Object.keys(original).length) { msg.textContent = 'Please click "Connect keyboard" at the top first.'; return; }
@@ -470,7 +486,7 @@ $('lcStart').onclick = async () => {
   try { for (let k = 0; k < 12; k++) t1[k] = (await readBlock(0x20 + k * 8, 1))[0]; } catch (e) { out.textContent += 'Could not read table 0x0020: ' + e.message + '\n'; }
   setBusy(false);
   const found = {}, rows = [], results = []; let n = 0, hit1 = 0, hit2 = 0;
-  const ask = () => { lcTarget = ORDER[n]; drawPad(); msg.textContent = `Step ${n + 1} of ${ORDER.length}: press the glowing key on your keyboard.`; window.focus(); };
+  const ask = () => { lcTarget = ORDER[n]; drawPad(); drawMini(); msg.textContent = `Step ${n + 1} of ${ORDER.length}: press the key '${ORDER[n]}' on your keyboard (it glows below).`; window.focus(); };
   const onKey = ev => {
     if (ev.repeat) return;
     ev.preventDefault();
@@ -484,7 +500,7 @@ $('lcStart').onclick = async () => {
     rows.push(`${label.padEnd(6)} typed ${String(ev.code).padEnd(14)} usage ${u === undefined ? '?   ' : '0x' + h2(u)}  table@0x0128: ${in2.length ? 'key #' + in2.join(',') : '-'}   table@0x0020: ${in1.length ? 'key #' + in1.join(',') : '-'}`);
     out.textContent = rows.join('\n'); n++;
     if (n < ORDER.length) return ask();
-    window.removeEventListener('keydown', onKey, true); lcTarget = null; drawPad();
+    window.removeEventListener('keydown', onKey, true); lcTarget = null; drawPad(); drawMini();
     const bad = results.filter(r => !r.ok);
     msg.textContent = bad.length ? `${bad.length} of 12 keys do not match the picture.` : 'All 12 keys match the picture. Your keyboard and this page agree.';
     msg.style.color = bad.length ? 'var(--bad-ink)' : 'var(--ok-ink)';
