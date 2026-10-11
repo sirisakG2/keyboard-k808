@@ -74,6 +74,14 @@ details{margin-top:6px}pre{background:#0f1115;color:#9fe3a9;padding:12px;border-
   <div class="row"><button id="pexport">Export profiles</button><label class="mute">Import profiles <input id="pimport" type="file" accept=".json"></label></div>
 </section>
 
+<section class="card">
+  <h2 style="margin:0 0 6px;font-size:1.05rem">Check my keys (live test)</h2>
+  <p class="mute" style="margin-top:0">Press each physical key when asked. I compare what it types with what the keyboard memory says, find the real key order and which key table is active. Nothing is written to the keyboard.</p>
+  <div class="row" style="margin-top:0"><button id="lcStart">Start live check</button><button id="lcUse" disabled>Use this key order</button></div>
+  <p id="lcMsg" style="font-weight:600;margin:8px 0 0"></p>
+  <pre id="lcOut" style="max-height:220px"></pre>
+</section>
+
 <section id="calBox" class="card" hidden>
   <h2 style="margin:0 0 6px;font-size:1.05rem">Check the key order (calibrate)</h2>
   <p>This gives every key its own letter (a to l), then asks you to press each physical key. Step 1 needs the keyboard connected.</p>
@@ -434,6 +442,53 @@ $('pimport').onchange = async ev => {
     for (const pr of j.profiles) { if (!pr.name || !pr.keys) continue; const i = profiles.findIndex(x => x.name === pr.name); if (i >= 0) profiles[i] = pr; else profiles.push(pr); }
     saveProfiles(); drawProfiles(); note('ok', 'Profiles imported.');
   } catch (e) { note('bad', 'Import failed: ' + e.message); }
+};
+
+// ---------- live check ----------
+const CODEMAP = { 0x28: 'Enter', 0x29: 'Escape', 0x2a: 'Backspace', 0x2b: 'Tab', 0x2c: 'Space', 0x2d: 'Minus', 0x2e: 'Equal', 0x2f: 'BracketLeft', 0x30: 'BracketRight',
+  0x31: 'Backslash', 0x33: 'Semicolon', 0x34: 'Quote', 0x35: 'Backquote', 0x36: 'Comma', 0x37: 'Period', 0x38: 'Slash', 0x39: 'CapsLock',
+  0x49: 'Insert', 0x4a: 'Home', 0x4b: 'PageUp', 0x4c: 'Delete', 0x4d: 'End', 0x4e: 'PageDown', 0x4f: 'ArrowRight', 0x50: 'ArrowLeft', 0x51: 'ArrowDown', 0x52: 'ArrowUp',
+  0x53: 'NumLock', 0x54: 'NumpadDivide', 0x55: 'NumpadMultiply', 0x56: 'NumpadSubtract', 0x57: 'NumpadAdd', 0x58: 'NumpadEnter', 0x62: 'Numpad0', 0x63: 'NumpadDecimal',
+  0xe0: 'ControlLeft', 0xe1: 'ShiftLeft', 0xe2: 'AltLeft', 0xe3: 'MetaLeft', 0xe4: 'ControlRight', 0xe5: 'ShiftRight', 0xe6: 'AltRight', 0xe7: 'MetaRight' };
+for (let i = 0; i < 26; i++) CODEMAP[0x04 + i] = 'Key' + String.fromCharCode(65 + i);
+for (let i = 0; i < 9; i++) { CODEMAP[0x1e + i] = 'Digit' + (i + 1); CODEMAP[0x59 + i] = 'Numpad' + (i + 1); }
+CODEMAP[0x27] = 'Digit0';
+for (let i = 0; i < 12; i++) CODEMAP[0x3a + i] = 'F' + (i + 1);
+const USAGE_OF = {}; for (const [u, c] of Object.entries(CODEMAP)) USAGE_OF[c] = parseInt(u, 10);
+let lcFound = null;
+$('lcStart').onclick = async () => {
+  const out = $('lcOut'), msg = $('lcMsg'); out.textContent = ''; lcFound = null; $('lcUse').disabled = true;
+  if (!dev || !Object.keys(original).length) { msg.textContent = 'Connect the keyboard first (so I can read its memory).'; return; }
+  setBusy(true);
+  let t1 = {};
+  try { for (let k = 0; k < 12; k++) t1[k] = (await readBlock(0x20 + k * 8, 1))[0]; } catch (e) { out.textContent += 'Could not read table 0x0020: ' + e.message + '\n'; }
+  setBusy(false);
+  const found = {}, rows = []; let n = 0, hit1 = 0, hit2 = 0;
+  const ask = () => { msg.textContent = `Click here once, then press the physical key: ${ORDER[n]}   (${n + 1}/${ORDER.length})`; };
+  const onKey = ev => {
+    if (ev.repeat) return;
+    ev.preventDefault();
+    const u = USAGE_OF[ev.code], label = ORDER[n];
+    const in2 = Object.keys(original).filter(k => original[k] === u).map(Number);
+    const in1 = Object.keys(t1).filter(k => t1[k] === u).map(Number);
+    if (in2.length) hit2++; if (in1.length) hit1++;
+    if (in2.length === 1) found[label] = in2[0];
+    rows.push(`${label.padEnd(6)} typed ${String(ev.code).padEnd(14)} usage ${u === undefined ? '?   ' : '0x' + h2(u)}  table@0x0128: ${in2.length ? 'key #' + in2.join(',') : '-'}   table@0x0020: ${in1.length ? 'key #' + in1.join(',') : '-'}`);
+    out.textContent = rows.join('\n'); n++;
+    if (n < ORDER.length) return ask();
+    window.removeEventListener('keydown', onKey, true);
+    const active = hit2 >= hit1 ? '0x0128' : '0x0020';
+    msg.textContent = `Done. Matches: table 0x0128 = ${hit2}/12, table 0x0020 = ${hit1}/12. Looks like the active table is ${hit2 === 0 && hit1 === 0 ? 'neither (keys type something else)' : active}.`;
+    if (Object.keys(found).length === ORDER.length) { lcFound = found; $('lcUse').disabled = false; }
+  };
+  window.addEventListener('keydown', onKey, true); ask();
+};
+$('lcUse').onclick = () => {
+  if (!lcFound) return;
+  try { localStorage.setItem('k808map', JSON.stringify(lcFound)); } catch (e) {}
+  for (const r of PHYS) if (lcFound[r[1]] !== undefined) r[0] = lcFound[r[1]];
+  $('mapWarn').hidden = true; original = {}; current = {}; sel = null;
+  note('ok', 'Key order saved. Reloading your keys...'); drawPad(); refreshButtons(); loadKeys();
 };
 
 // ---------- start ----------
