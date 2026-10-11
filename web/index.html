@@ -59,7 +59,7 @@ async function readBlock(addr, n, mode) {
     await send(pkt(5, i, lo, hi, 0, (mode ? n + 0x5f : n - 1) & 0xff));
     await sleep(1);
     const v = await dev.receiveFeatureReport(7);
-    out.push(v.getUint8(0));
+    out.push(v.getUint8(1)); // Chrome includes the report ID at index 0
     if (i === 0) log('  raw reply (first): ' + [...new Uint8Array(v.buffer)].map(h2).join(' '));
   }
   await sleep(1);
