@@ -82,3 +82,9 @@ Config base = 0x00e0 (vendor reads it from the device; our dump at 0x00d0 holds 
 - First real write (key 11 -> 0x09) used only cmd3 / cmd9 / cmd1 and **survived a replug**.
 - After adding the vendor begin (07 09 41 00) + finish (0x11, 0) packets, saves read back correctly but were **gone after a replug**.
 - The page now defaults to the simple method; the vendor-style method is an option ("Save method" in More tools). After each save the page remembers what it wrote and checks on the next Connect whether it survived.
+
+## Two key tables: KEYSMODE (found 2026-10-11 from a real debug report)
+- Bit 7 of the settings byte at `0x00e0` = vendor `KEYSMODE` (loader at 0x41bf11 reads ini key KEYSMODE into 0x61f104; the writer puts it in bit 7).
+  KEYSMODE=1 -> keyboard uses table `0x0128`; KEYSMODE=0 -> table `0x0020` (keypad codes KP1..KP., knob f4/e9).
+- Real keyboard was `c0` (mode 1) at first, later `40` (mode 0): the `.` key then typed "." (KP .) although table 0x0128 held 0x0b.
+- The page now reads the mode on connect, edits the table in use, and by default writes the same key to both tables.

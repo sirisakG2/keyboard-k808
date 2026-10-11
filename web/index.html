@@ -85,6 +85,7 @@ a{color:var(--cyan)}
   <div class="brand">K808 <small id="ver"></small></div>
   <div class="conn">
     <span id="status" class="chip">Not connected</span>
+    <span id="modeChip" class="chip" hidden title="Which of the two key tables the keyboard is using"></span>
     <button id="connect" class="tbtn primary">Connect keyboard</button>
     <button id="disconnect" class="tbtn">Disconnect</button>
     <button id="report" class="tbtn">Copy debug report</button>
@@ -160,6 +161,7 @@ a{color:var(--cyan)}
     <details><summary>More tools</summary>
       <p><label class="mute"><input id="backupChk" type="checkbox" checked> Download a backup file on the first save each visit</label><br>
       <label class="mute"><input id="autoDisc" type="checkbox" checked> Disconnect automatically after saving</label><br>
+      <label class="mute"><input id="bothModes" type="checkbox" checked> Save keys to both key modes (so they work whichever mode the keyboard is in)</label><br>
       <label class="mute">Save method <select id="saveMethod"><option value="simple">Simple (the method that survived a replug)</option><option value="vendor">Vendor-style (begin + finish packets)</option></select></label></p>
       <p><button id="wake" class="tbtn">Unfreeze keyboard</button> <label class="mute">Restore keys from a backup file <input id="bfile" type="file" accept=".json"></label></p>
       <p><button id="ffStart" class="tbtn">Find what freezes the keyboard</button></p>
@@ -278,7 +280,10 @@ const SLOTS = [...PHYS.map(r => ({ k: r[0], label: r[1], def: r[7] })), ...KNOB.
 const slotByK = k => SLOTS.find(s => s.k === k);
 
 // ---------- WebHID protocol (see docs/PROTOCOL.md) ----------
-const T2 = 0x128;
+// Two key tables; bit 7 of the settings byte at 0x00e0 (vendor "KEYSMODE") picks the one in use:
+// KEYSMODE=1 -> 0x0128, KEYSMODE=0 -> 0x0020 (found in the vendor app and confirmed on the real keyboard).
+const T_MODE1 = 0x128, T_MODE0 = 0x20;
+let T2 = T_MODE1, keysMode = 1;
 let dev = null, featLen = 0, busy = false;
 const isK808 = d => d.vendorId === 0x30fa && d.productId === 0x2350;
 function pkt(cmd, idx, lo, hi, data, last) { const b = new Uint8Array(featLen); b[0] = 0x18; b[1] = cmd; b[2] = idx; b[3] = lo; b[4] = hi; b[5] = data; b[6] = last; return b; }
@@ -416,6 +421,10 @@ async function loadKeys() {
   setBusy(true);
   try {
     original = {}; current = {};
+    const flags = (await readBlock(0xe0, 1))[0];
+    keysMode = flags >> 7; T2 = keysMode ? T_MODE1 : T_MODE0;
+    $('modeChip').textContent = `Key mode ${keysMode} (table 0x${T2.toString(16).padStart(4, '0')})`; $('modeChip').hidden = false;
+    log(`Settings byte 0x00e0 = 0x${h2(flags)} -> KEYSMODE ${keysMode}, using key table 0x${T2.toString(16)}`);
     for (const s of SLOTS) { const v = (await readBlock(T2 + s.k * 8, 1))[0]; original[s.k] = v; current[s.k] = v; }
     note('ok', 'Loaded your keys from the keyboard.'); log('Loaded: ' + JSON.stringify(original));
     checkLastSaved();
@@ -468,7 +477,11 @@ async function save() {
     upsertCfg({ name: '(before last save)', keys: keysByLabel(original) }, false);
     if ($('backupChk').checked && !backedUp) { await downloadBackup('k808-backup-' + new Date().toISOString().replace(/[:.]/g, '-') + '.json'); backedUp = true; }
     await startSession();
-    for (const s of todo) { await writeByteRaw(T2 + s.k * 8, current[s.k]); log(`Wrote ${s.label} (#${s.k}): 0x${h2(original[s.k])} -> 0x${h2(current[s.k])}`); }
+    const other = T2 === T_MODE1 ? T_MODE0 : T_MODE1;
+    for (const s of todo) {
+      await writeByteRaw(T2 + s.k * 8, current[s.k]); log(`Wrote ${s.label} (#${s.k}) in table 0x${T2.toString(16)}: 0x${h2(original[s.k])} -> 0x${h2(current[s.k])}`);
+      if ($('bothModes').checked) { await writeByteRaw(other + s.k * 8, current[s.k]); log(`Also wrote ${s.label} in table 0x${other.toString(16)}`); }
+    }
     await endSession(); await sleep(500);
     let bad = 0;
     for (const s of todo) { const got = (await readBlock(T2 + s.k * 8, 1))[0]; log(`Check ${s.label}: 0x${h2(got)}`); if (got === current[s.k]) original[s.k] = got; else bad++; }
@@ -675,7 +688,7 @@ $('report').onclick = async () => {
   const v = window.APP_VERSION || {};
   const text = ['K808 debug report', 'version: ' + (v.commit || 'unknown'), 'browser: ' + navigator.userAgent,
     'connected: ' + !!dev + (dev ? ' opened=' + dev.opened + ' featLen=' + featLen : ''),
-    'saved key order: ' + (localStorage.getItem('k808map') || 'none'), 'save method: ' + $('saveMethod').value,
+    'saved key order: ' + (localStorage.getItem('k808map') || 'none'), 'save method: ' + $('saveMethod').value, 'key mode: ' + keysMode + ' table 0x' + T2.toString(16) + ' both=' + $('bothModes').checked,
     'keys in memory: ' + JSON.stringify(original), 'keys in editor: ' + JSON.stringify(current),
     'message bar: ' + ($('note').textContent || '(empty)'), '--- log ---', ...logLines.slice(-80)].join('\n');
   try { await navigator.clipboard.writeText(text); note('ok', 'Debug report copied. Paste it into the chat.'); }
