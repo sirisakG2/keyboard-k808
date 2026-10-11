@@ -40,3 +40,15 @@ Typical read: `cmd=5` request, then `GetFeature` with first byte `7`; the answer
 - Exact meaning of byte 7 and the global mode flag at `0x63dda8`.
 - Address map: where key matrix, RGB and macros live in keyboard memory.
 - Best confirmed by a USBPcap capture of the official app.
+
+## Verified on hardware (read path, 2026-10-11)
+- WebHID `receiveFeatureReport(7)` returns the report ID at index 0; payload byte is index 1.
+- Read of n bytes at addr: n x `cmd3` (zero staging), `cmd0` (load addr), n x `cmd5` + GetFeature, `cmd1` (end). Length byte = n-1 works.
+- Device answers in 8-byte blocks; step addresses by 8.
+- Memory map seen (0x0000-0x03ff):
+  - `0x0000`: `b4 01 b4 | 50 23 (PID) | fa 30 (VID) | 4b` device info.
+  - `0x0020 + 8*k`: key k (14 keys), HID usage code, e.g. `59 5a 5b 5c 5d 58 61 60 5f 5e 62 63 f4 e9` (keypad codes).
+  - `0x0128 + 8*k`: second table `1e 52 20 21 22 28 26 4f 51 50 27 35 f4 e9` (differs from KBconfig.ini default: arrows on keys 1,7,8,9).
+  - `0x0100-0x011f`: settings/LED nibbles (unknown).
+  - `0x01d8-0x023f`: repeating `07 00 40 02 00` (unknown).
+  - `0x0240-0x031f`: macro data (HID codes incl. `e0` LCtrl + `04/06/16/19`, i.e. Ctrl+A/C/S/V style).
