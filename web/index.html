@@ -23,6 +23,14 @@ pre{background:#111;color:#0f0;padding:1rem;min-height:8rem;overflow:auto;white-
 <br><button id="read">Read</button>
 </fieldset>
 
+<fieldset id="dumpBox" disabled>
+<legend>3. Dump memory (read only)</legend>
+<p>Reads the keyboard 8 bytes at a time and looks for the default key layout (1,2,3,4,5,Enter,9,8,7,6,0,`).</p>
+<label>From (hex) <input id="from" value="0000"></label>
+<label>To (hex) <input id="to" value="03ff"></label>
+<br><button id="dump">Dump</button>
+</fieldset>
+
 <pre id="log"></pre>
 <script>
 const logEl = document.getElementById('log');
@@ -60,7 +68,6 @@ async function readBlock(addr, n, mode) {
     await sleep(1);
     const v = await dev.receiveFeatureReport(7);
     out.push(v.getUint8(1)); // Chrome includes the report ID at index 0
-    if (i === 0) log('  raw reply (first): ' + [...new Uint8Array(v.buffer)].map(h2).join(' '));
   }
   await sleep(1);
   await send(pkt(1, 0, 0, 0, 0, 0)); // end of read
@@ -81,6 +88,7 @@ document.getElementById('connect').onclick = async () => {
     log(`Vendor interface 0xff01 found. Feature report 7 data length: ${featLen} bytes`);
     if (featLen < 7) return log('Report too short for the known packet format (needs 7+). Send this text to Claude.');
     document.getElementById('readBox').disabled = false;
+    document.getElementById('dumpBox').disabled = false;
   } catch (e) { log('Error: ' + e.message); }
 };
 
@@ -93,6 +101,26 @@ document.getElementById('read').onclick = async () => {
   try {
     const data = await readBlock(addr, n, mode);
     log('Result: ' + data.map(h2).join(' '));
+  } catch (e) { log('Error: ' + e.message); }
+};
+</script>
+<script>
+document.getElementById('dump').onclick = async () => {
+  const from = parseInt(document.getElementById('from').value, 16) & 0xfff8;
+  const to = Math.min(0xffff, parseInt(document.getElementById('to').value, 16));
+  if (Number.isNaN(from) || Number.isNaN(to) || to < from) return log('Bad range.');
+  log(`Dumping ${hex(from)} - ${hex(to)} ...`);
+  const all = [];
+  try {
+    for (let a = from; a <= to; a += 8) {
+      const row = await readBlock(a, 8, 0);
+      all.push(...row);
+      log(hex(a) + ': ' + row.map(h2).join(' '));
+    }
+    const hexAll = all.map(h2).join('');
+    const hit = hexAll.indexOf('1e1f20212228262524232735');
+    log(hit >= 0 ? `Default key layout found at ${hex(from + hit / 2)}` : 'Default key layout not found in this range.');
+    log('Done.');
   } catch (e) { log('Error: ' + e.message); }
 };
 </script></body></html>
