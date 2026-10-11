@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "k808-configurator",
+  "name": "keyboard-k808",
   "compatibility_date": "2025-06-01",
   "assets": { "directory": "./web" }
 }
