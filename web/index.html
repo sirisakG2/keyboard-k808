@@ -23,6 +23,7 @@ button:disabled{opacity:.45;cursor:not-allowed}
 .key{border:2px solid transparent;border-radius:10px;background:var(--k2);color:#12141a;display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1.15;padding:2px;text-align:center}
 .key small{font-size:.7rem;opacity:.7}.key b{font-size:1.05rem;word-break:break-all}
 .key.red{background:var(--k1);color:#fff}.key.yellow{background:var(--k3)}
+.key.target{outline:4px solid #00e5ff;animation:pulse 1s infinite}@keyframes pulse{50%{outline-color:transparent}}
 .key.changed{outline:3px solid var(--changed)}.key.sel{border-color:#fff;box-shadow:0 0 0 3px var(--accent)}
 .knob{grid-column:1;grid-row:3;align-self:end;justify-self:start;width:52px;height:52px;border-radius:50%;background:radial-gradient(#d8dbe0,#8d929c);border:0;margin:0 0 4px 4px;padding:0;font-size:.65rem;color:#222}
 .groups button{margin:2px;padding:.3rem .6rem;font-size:.9rem}
@@ -35,7 +36,7 @@ details{margin-top:6px}pre{background:#0f1115;color:#9fe3a9;padding:12px;border-
 </head><body><div class="wrap">
 <header>
   <div><h1>K808 Configurator</h1><span id="status" class="chip">Not connected</span></div>
-  <div><button id="connect" class="primary">Connect keyboard</button> <button id="disconnect">Disconnect</button></div>
+  <div><button id="connect" class="primary">Connect keyboard</button> <button id="disconnect">Disconnect</button> <button id="report">Copy debug report</button></div>
 </header>
 
 <div id="support" class="banner bad" hidden>This browser can't talk to USB keyboards. Use Chrome or Edge on a computer.</div>
@@ -75,11 +76,13 @@ details{margin-top:6px}pre{background:#0f1115;color:#9fe3a9;padding:12px;border-
 </section>
 
 <section class="card">
-  <h2 style="margin:0 0 6px;font-size:1.05rem">Check my keys (live test)</h2>
-  <p class="mute" style="margin-top:0">Press each physical key when asked. I compare what it types with what the keyboard memory says, find the real key order and which key table is active. Nothing is written to the keyboard.</p>
-  <div class="row" style="margin-top:0"><button id="lcStart">Start live check</button><button id="lcUse" disabled>Use this key order</button></div>
+  <h2 style="margin:0 0 6px;font-size:1.05rem">Test my keys</h2>
+  <p class="mute" style="margin-top:0">Checks that each physical key types what this page shows. Nothing is written to the keyboard.</p>
+  <ol class="mute" style="margin:4px 0 8px;padding-left:20px"><li>Connect the keyboard (keys appear above).</li><li>Click <b>Start test</b>.</li><li>Press the <b style="color:#00a5bd">glowing</b> key on your real keyboard. 12 times.</li></ol>
+  <div class="row" style="margin-top:0"><button id="lcStart">Start test</button><button id="lcUse" disabled>Fix the picture to match my keyboard</button></div>
   <p id="lcMsg" style="font-weight:600;margin:8px 0 0"></p>
-  <pre id="lcOut" style="max-height:220px"></pre>
+  <div id="lcRes"></div>
+  <details><summary>Technical details</summary><pre id="lcOut" style="max-height:220px"></pre></details>
 </section>
 
 <section id="calBox" class="card" hidden>
@@ -103,7 +106,10 @@ details{margin-top:6px}pre{background:#0f1115;color:#9fe3a9;padding:12px;border-
 'use strict';
 const $ = id => document.getElementById(id);
 const logEl = $('log');
-const log = t => { logEl.textContent += t + '\n'; logEl.scrollTop = logEl.scrollHeight; };
+const logLines = [];
+const log = t => { logLines.push(new Date().toISOString().slice(11, 23) + ' ' + t); logEl.textContent += t + '\n'; logEl.scrollTop = logEl.scrollHeight; };
+window.addEventListener('error', e => log('PAGE ERROR: ' + e.message));
+window.addEventListener('unhandledrejection', e => log('PAGE ERROR: ' + (e.reason && e.reason.message || e.reason)));
 const h2 = n => n.toString(16).padStart(2, '0');
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -213,7 +219,7 @@ function drawPad() {
   const pad = $('pad'); pad.innerHTML = '';
   for (const [k, label, col, row, cs, rs, color] of PHYS) {
     const b = document.createElement('button');
-    b.className = 'key ' + color + (current[k] !== original[k] && current[k] !== undefined ? ' changed' : '') + (sel === k ? ' sel' : '');
+    b.className = 'key ' + color + (current[k] !== original[k] && current[k] !== undefined ? ' changed' : '') + (sel === k ? ' sel' : '') + (typeof lcTarget !== 'undefined' && lcTarget === label ? ' target' : '');
     b.style.cssText = `grid-column:${col}/span ${cs};grid-row:${row}/span ${rs}`;
     b.innerHTML = `<small>${label}</small><b>${current[k] === undefined ? '?' : nm(current[k])}</b>`;
     b.onclick = () => { sel = k; $('selTitle').textContent = `Key "${label}" sends: ${current[k] === undefined ? '?' : nm(current[k])}`; drawPicker(); drawPad(); refreshButtons(); };
@@ -455,16 +461,16 @@ for (let i = 0; i < 9; i++) { CODEMAP[0x1e + i] = 'Digit' + (i + 1); CODEMAP[0x5
 CODEMAP[0x27] = 'Digit0';
 for (let i = 0; i < 12; i++) CODEMAP[0x3a + i] = 'F' + (i + 1);
 const USAGE_OF = {}; for (const [u, c] of Object.entries(CODEMAP)) USAGE_OF[c] = parseInt(u, 10);
-let lcFound = null;
+let lcFound = null, lcTarget = null;
 $('lcStart').onclick = async () => {
-  const out = $('lcOut'), msg = $('lcMsg'); out.textContent = ''; lcFound = null; $('lcUse').disabled = true;
-  if (!dev || !Object.keys(original).length) { msg.textContent = 'Connect the keyboard first (so I can read its memory).'; return; }
+  const out = $('lcOut'), msg = $('lcMsg'), res = $('lcRes'); out.textContent = ''; res.innerHTML = ''; lcFound = null; $('lcUse').disabled = true;
+  if (!dev || !Object.keys(original).length) { msg.textContent = 'Please click "Connect keyboard" at the top first.'; return; }
   setBusy(true);
   let t1 = {};
   try { for (let k = 0; k < 12; k++) t1[k] = (await readBlock(0x20 + k * 8, 1))[0]; } catch (e) { out.textContent += 'Could not read table 0x0020: ' + e.message + '\n'; }
   setBusy(false);
-  const found = {}, rows = []; let n = 0, hit1 = 0, hit2 = 0;
-  const ask = () => { msg.textContent = `Click here once, then press the physical key: ${ORDER[n]}   (${n + 1}/${ORDER.length})`; };
+  const found = {}, rows = [], results = []; let n = 0, hit1 = 0, hit2 = 0;
+  const ask = () => { lcTarget = ORDER[n]; drawPad(); msg.textContent = `Step ${n + 1} of ${ORDER.length}: press the glowing key on your keyboard.`; window.focus(); };
   const onKey = ev => {
     if (ev.repeat) return;
     ev.preventDefault();
@@ -473,13 +479,20 @@ $('lcStart').onclick = async () => {
     const in1 = Object.keys(t1).filter(k => t1[k] === u).map(Number);
     if (in2.length) hit2++; if (in1.length) hit1++;
     if (in2.length === 1) found[label] = in2[0];
+    const row = PHYS.find(r => r[1] === label), shown = original[row[0]];
+    results.push({ label, typed: u === undefined ? ev.code : nm(u), shown: nm(shown), ok: u === shown });
     rows.push(`${label.padEnd(6)} typed ${String(ev.code).padEnd(14)} usage ${u === undefined ? '?   ' : '0x' + h2(u)}  table@0x0128: ${in2.length ? 'key #' + in2.join(',') : '-'}   table@0x0020: ${in1.length ? 'key #' + in1.join(',') : '-'}`);
     out.textContent = rows.join('\n'); n++;
     if (n < ORDER.length) return ask();
-    window.removeEventListener('keydown', onKey, true);
-    const active = hit2 >= hit1 ? '0x0128' : '0x0020';
-    msg.textContent = `Done. Matches: table 0x0128 = ${hit2}/12, table 0x0020 = ${hit1}/12. Looks like the active table is ${hit2 === 0 && hit1 === 0 ? 'neither (keys type something else)' : active}.`;
-    if (Object.keys(found).length === ORDER.length) { lcFound = found; $('lcUse').disabled = false; }
+    window.removeEventListener('keydown', onKey, true); lcTarget = null; drawPad();
+    const bad = results.filter(r => !r.ok);
+    msg.textContent = bad.length ? `${bad.length} of 12 keys do not match the picture.` : 'All 12 keys match the picture. Your keyboard and this page agree.';
+    msg.style.color = bad.length ? 'var(--bad-ink)' : 'var(--ok-ink)';
+    res.innerHTML = '<table style="border-collapse:collapse;margin-top:6px">' + '<tr><th align="left" style="padding:2px 10px 2px 0">Key you pressed</th><th align="left" style="padding:2px 10px 2px 0">Typed</th><th align="left" style="padding:2px 10px 2px 0">Picture says</th><th></th></tr>' +
+      results.map(r => `<tr><td style="padding:2px 10px 2px 0"><b>${r.label}</b></td><td style="padding:2px 10px 2px 0">${r.typed}</td><td style="padding:2px 10px 2px 0">${r.shown}</td><td>${r.ok ? '\u2705' : '\u274c'}</td></tr>`).join('') + '</table>';
+    if (bad.length && hit2 === 0 && hit1 === 0) res.innerHTML += '<p class="banner warn">The keyboard types things that are not in its saved key table. Send me the Technical details text.</p>';
+    else if (bad.length && Object.keys(found).length === ORDER.length) { lcFound = found; $('lcUse').disabled = false; res.innerHTML += '<p class="mute">Click <b>Fix the picture</b> and the picture will follow your real key positions.</p>'; }
+    else if (bad.length && hit1 > hit2) res.innerHTML += '<p class="banner warn">Your keyboard is using a different saved key table (0x0020). Send me the Technical details text.</p>';
   };
   window.addEventListener('keydown', onKey, true); ask();
 };
@@ -488,7 +501,18 @@ $('lcUse').onclick = () => {
   try { localStorage.setItem('k808map', JSON.stringify(lcFound)); } catch (e) {}
   for (const r of PHYS) if (lcFound[r[1]] !== undefined) r[0] = lcFound[r[1]];
   $('mapWarn').hidden = true; original = {}; current = {}; sel = null;
-  note('ok', 'Key order saved. Reloading your keys...'); drawPad(); refreshButtons(); loadKeys();
+  note('ok', 'The picture now follows your keyboard. Reloading your keys...'); drawPad(); refreshButtons(); loadKeys();
+};
+
+$('report').onclick = async () => {
+  const v = window.APP_VERSION || {};
+  const text = ['K808 debug report', 'version: ' + (v.commit || 'unknown'), 'browser: ' + navigator.userAgent,
+    'connected: ' + !!dev + (dev ? ' opened=' + dev.opened + ' featLen=' + featLen : ''),
+    'saved key order: ' + (localStorage.getItem('k808map') || 'none'),
+    'keys in memory: ' + JSON.stringify(original), 'keys in editor: ' + JSON.stringify(current),
+    'message bar: ' + ($('note').textContent || '(empty)'), '--- log ---', ...logLines.slice(-80)].join('\n');
+  try { await navigator.clipboard.writeText(text); note('ok', 'Debug report copied. Paste it into the chat.'); }
+  catch (e) { const ta = document.createElement('textarea'); ta.value = text; ta.style.cssText = 'width:100%;height:200px'; document.body.prepend(ta); ta.select(); note('warn', 'Could not copy automatically. Select all in the box at the top of the page and copy it.'); }
 };
 
 // ---------- start ----------
