@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>K808 Configurator</title>
+<style>
+body{font-family:system-ui,sans-serif;max-width:720px;margin:2rem auto;padding:0 1rem}
+button{font-size:1rem;padding:.6rem 1rem}
+pre{background:#111;color:#0f0;padding:1rem;min-height:8rem;overflow:auto;white-space:pre-wrap}
+</style></head><body>
+<h1>K808 Configurator (step 1: connect only)</h1>
+<p>Needs Chrome or Edge on desktop. This step only reads device info; it changes nothing on the keyboard.</p>
+<button id="connect">Connect keyboard</button>
+<pre id="log"></pre>
+<script>
+const log = t => document.getElementById('log').textContent += t + '\n';
+const hex = n => '0x' + n.toString(16).padStart(4, '0');
+document.getElementById('connect').onclick = async () => {
+  if (!('hid' in navigator)) return log('WebHID not supported. Use Chrome or Edge.');
+  try {
+    const devs = await navigator.hid.requestDevice({
+      filters: [{ vendorId: 0x30fa, productId: 0x2350 }, { vendorId: 0x30fa }]
+    });
+    if (!devs.length) return log('No device selected.');
+    for (const d of devs) {
+      log(`Device: ${d.productName}  VID ${hex(d.vendorId)}  PID ${hex(d.productId)}`);
+      for (const c of d.collections) {
+        log(`  usagePage ${hex(c.usagePage)} usage ${c.usage}  input:${c.inputReports.length} output:${c.outputReports.length} feature:${c.featureReports.map(f => 'id' + f.reportId).join(',') || 0}`);
+      }
+    }
+    log('Copy this text and send it back to Claude.');
+  } catch (e) { log('Error: ' + e.message); }
+};
+</script></body></html>
