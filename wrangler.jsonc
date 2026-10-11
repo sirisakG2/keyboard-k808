@@ -1,0 +1,6 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "k808-configurator",
+  "compatibility_date": "2025-06-01",
+  "assets": { "directory": "./web" }
+}
