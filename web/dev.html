@@ -66,6 +66,16 @@ pre{background:#111;color:#0f0;padding:1rem;min-height:8rem;overflow:auto;white-
 <button id="gapply" disabled>Apply changes</button>
 </fieldset>
 
+<fieldset id="lab" disabled>
+<legend>Lab: find what freezes the keys (press keys in Notepad after EACH button)</legend>
+<p>Open Notepad. After each button, type on the keyboard and note if it still types. Press the buttons in order and stop when the keys freeze.</p>
+<button id="l1">1. Begin packet (07 09 41 00)</button>
+<button id="l2">2. Finish (cmd 0x11 then 0)</button>
+<button id="l3">3. Vendor-style rewrite of key 11 (same value, no change)</button>
+<button id="l4">4. Finish again</button>
+<button id="l5">5. Close connection</button>
+</fieldset>
+
 <pre id="log"></pre>
 <script>
 const logEl = document.getElementById('log');
@@ -123,6 +133,7 @@ document.getElementById('connect').onclick = async () => {
     log(`Vendor interface 0xff01 found. Feature report 7 data length: ${featLen} bytes`);
     if (featLen < 7) return log('Report too short for the known packet format (needs 7+). Send this text to Claude.');
     document.getElementById('readBox').disabled = false;
+    document.getElementById('lab').disabled = false;
     document.getElementById('dumpBox').disabled = false;
     document.getElementById('layoutBox').disabled = false;
     document.getElementById('editBox').disabled = false;
@@ -359,4 +370,25 @@ document.getElementById('cstart').onclick = () => {
   window.addEventListener('keydown', onKey, true); ask();
 };
 document.getElementById('creset').onclick = () => { localStorage.removeItem('k808map'); cmsg.textContent = 'Map forgotten. Reload the page.'; };
+</script>
+<script>
+const rawSend = async arr => { const b = new Uint8Array(featLen); b.set(arr); await send(b); };
+document.getElementById('l1').onclick = async () => { try { await rawSend([0x09, 0x41, 0, 0, 0, 0, 0]); await sleep(200); log('Sent begin (07 09 41 00 ...). Test keys now.'); } catch (e) { log('Error: ' + e.message); } };
+const finish = async () => { await send(pkt(0x11, 0, 0, 0, 0, 0)); await sleep(10); await send(pkt(0, 0, 0, 0, 0, 0)); await sleep(10); };
+document.getElementById('l2').onclick = async () => { try { await finish(); log('Sent finish (0x11, 0). Test keys now.'); } catch (e) { log('Error: ' + e.message); } };
+document.getElementById('l4').onclick = document.getElementById('l2').onclick;
+document.getElementById('l3').onclick = async () => {
+  try {
+    const addr = 0x128 + 11 * 8, lo = addr & 0xff, hi = addr >> 8;
+    const slot = await readBlock(addr, 8, 0);
+    log('Slot bytes: ' + slot.map(h2).join(' '));
+    await rawSend([0x09, 0x41, 0, 0, 0, 0, 0]); await sleep(200);
+    for (let i = 0; i < 8; i++) await send(pkt(3, i, lo, hi, slot[i], 7));
+    await sleep(2); await send(pkt(9, 0, lo, hi, 0, 7)); await sleep(10);
+    await send(pkt(1, 0, lo, hi, 0, 0)); await sleep(10);
+    await finish();
+    log('Vendor-style rewrite done (same values). Test keys now. Slot now: ' + (await readBlock(addr, 8, 0)).map(h2).join(' '));
+  } catch (e) { log('Error: ' + e.message); }
+};
+document.getElementById('l5').onclick = async () => { try { await dev.close(); log('Closed. Test keys now.'); } catch (e) { log('Error: ' + e.message); } };
 </script></body></html>
