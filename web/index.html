@@ -3,30 +3,96 @@
 <title>K808 Configurator</title>
 <style>
 body{font-family:system-ui,sans-serif;max-width:720px;margin:2rem auto;padding:0 1rem}
-button{font-size:1rem;padding:.6rem 1rem}
+button{font-size:1rem;padding:.6rem 1rem;margin:.2rem 0}
+input,select{font-size:1rem;padding:.4rem;width:6rem}
+fieldset{margin:1rem 0;border:1px solid #888;border-radius:6px}
 pre{background:#111;color:#0f0;padding:1rem;min-height:8rem;overflow:auto;white-space:pre-wrap}
 </style></head><body>
-<h1>K808 Configurator (step 1: connect only)</h1>
-<p>Needs Chrome or Edge on desktop. This step only reads device info; it changes nothing on the keyboard.</p>
-<button id="connect">Connect keyboard</button>
+<h1>K808 Configurator</h1>
+<p>Needs Chrome or Edge on desktop. Close the official keyboard app first.</p>
+<button id="connect">1. Connect keyboard</button>
+
+<fieldset id="readBox" disabled>
+<legend>2. Read test (read only, never saves to the keyboard)</legend>
+<p>Follows the vendor app's read sequence. The "zero staging buffer" step in it writes zeros to the keyboard's temporary buffer only.</p>
+<label>Address (hex) <input id="addr" value="0000"></label>
+<label>Bytes <input id="count" type="number" value="16" min="1" max="64"></label>
+<label>Length byte mode
+  <select id="mode" style="width:auto"><option value="0">count-1 (try first)</option><option value="1">count+0x5f</option></select>
+</label>
+<br><button id="read">Read</button>
+</fieldset>
+
 <pre id="log"></pre>
 <script>
-const log = t => document.getElementById('log').textContent += t + '\n';
-const hex = n => '0x' + n.toString(16).padStart(4, '0');
+const logEl = document.getElementById('log');
+const log = t => { logEl.textContent += t + '\n'; };
+const hex = (n, w = 4) => '0x' + n.toString(16).padStart(w, '0');
+const h2 = n => n.toString(16).padStart(2, '0');
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+let dev = null, featLen = 0; // featLen = bytes after the report-ID byte
+
+function featureDataLength(col) {
+  const r = col.featureReports.find(f => f.reportId === 7);
+  if (!r) return 0;
+  let bits = 0;
+  for (const it of r.items) bits += (it.reportSize || 0) * (it.reportCount || 0);
+  return bits / 8;
+}
+
+// Build a feature report payload (everything after report ID 7).
+function pkt(cmd, idx, lo, hi, data, last) {
+  const b = new Uint8Array(featLen);
+  b[0] = 0x18; b[1] = cmd; b[2] = idx; b[3] = lo; b[4] = hi; b[5] = data; b[6] = last;
+  return b;
+}
+const send = async b => { await dev.sendFeatureReport(7, b); };
+
+async function readBlock(addr, n, mode) {
+  const lo = addr & 0xff, hi = (addr >> 8) & 0xff;
+  for (let i = 0; i < n; i++) await send(pkt(3, i, lo, hi, 0, (n - 1) & 0xff));
+  await sleep(1);
+  await send(pkt(0, 0, lo, hi, 0, 0));
+  await sleep(1);
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    await send(pkt(5, i, lo, hi, 0, (mode ? n + 0x5f : n - 1) & 0xff));
+    await sleep(1);
+    const v = await dev.receiveFeatureReport(7);
+    out.push(v.getUint8(0));
+    if (i === 0) log('  raw reply (first): ' + [...new Uint8Array(v.buffer)].map(h2).join(' '));
+  }
+  await sleep(1);
+  await send(pkt(1, 0, 0, 0, 0, 0)); // end of read
+  return out;
+}
+
 document.getElementById('connect').onclick = async () => {
   if (!('hid' in navigator)) return log('WebHID not supported. Use Chrome or Edge.');
   try {
-    const devs = await navigator.hid.requestDevice({
-      filters: [{ vendorId: 0x30fa, productId: 0x2350 }, { vendorId: 0x30fa }]
-    });
+    const devs = await navigator.hid.requestDevice({ filters: [{ vendorId: 0x30fa, productId: 0x2350 }] });
     if (!devs.length) return log('No device selected.');
-    for (const d of devs) {
-      log(`Device: ${d.productName}  VID ${hex(d.vendorId)}  PID ${hex(d.productId)}`);
-      for (const c of d.collections) {
-        log(`  usagePage ${hex(c.usagePage)} usage ${c.usage}  input:${c.inputReports.length} output:${c.outputReports.length} feature:${c.featureReports.map(f => 'id' + f.reportId).join(',') || 0}`);
-      }
-    }
-    log('Copy this text and send it back to Claude.');
+    dev = devs[0];
+    if (!dev.opened) await dev.open();
+    log(`Connected: ${dev.productName}  VID ${hex(dev.vendorId)}  PID ${hex(dev.productId)}`);
+    const col = dev.collections.find(c => c.usagePage === 0xff01);
+    if (!col) return log('Vendor interface 0xff01 not found.');
+    featLen = featureDataLength(col);
+    log(`Vendor interface 0xff01 found. Feature report 7 data length: ${featLen} bytes`);
+    if (featLen < 7) return log('Report too short for the known packet format (needs 7+). Send this text to Claude.');
+    document.getElementById('readBox').disabled = false;
+  } catch (e) { log('Error: ' + e.message); }
+};
+
+document.getElementById('read').onclick = async () => {
+  const addr = parseInt(document.getElementById('addr').value, 16);
+  const n = Math.min(64, Math.max(1, parseInt(document.getElementById('count').value, 10)));
+  const mode = parseInt(document.getElementById('mode').value, 10);
+  if (Number.isNaN(addr)) return log('Bad address.');
+  log(`Reading ${n} bytes at ${hex(addr)} (mode ${mode})...`);
+  try {
+    const data = await readBlock(addr, n, mode);
+    log('Result: ' + data.map(h2).join(' '));
   } catch (e) { log('Error: ' + e.message); }
 };
 </script></body></html>
