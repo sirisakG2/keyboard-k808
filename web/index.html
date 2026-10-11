@@ -50,6 +50,7 @@ details{margin-top:6px}pre{background:#0f1115;color:#9fe3a9;padding:12px;border-
       <button id="revert" disabled>Undo unsaved</button>
       <button id="defaults" disabled>Vendor defaults</button>
       <button id="apply" class="primary" disabled>Apply to keyboard</button>
+      <button id="wake" disabled title="Sends the vendor app's finish command. Use if the keyboard stopped typing.">Unfreeze keyboard</button>
     </div>
     <label class="mute" style="display:block;margin-top:8px"><input id="backupChk" type="checkbox" checked> Download a backup file (only once per page visit)</label>
     <label class="mute" style="display:block"><input id="autoDisc" type="checkbox" checked> Disconnect automatically after Apply</label>
@@ -158,6 +159,14 @@ async function writeByte(addr, val) {
   return (await readBlock(addr, 1))[0];
 }
 
+// The vendor app ends every write session with cmd 0x11 then cmd 0 (found in its code, function 0x40fd80).
+// Without it the keyboard stays in programming mode and stops typing until replugged.
+async function finishWrite() {
+  await send(pkt(0x11, 0, 0, 0, 0, 0)); await sleep(10);
+  await send(pkt(0, 0, 0, 0, 0, 0)); await sleep(10);
+  log('Sent finish (0x11, 0).');
+}
+
 // ---------- state ----------
 let current = {}, original = {}, sel = null, backedUp = false;   // key# -> code
 let filter = 'Letters';
@@ -167,7 +176,7 @@ function setBusy(b) { busy = b; refreshButtons(); }
 function dirty() { return PHYS.some(r => current[r[0]] !== undefined && current[r[0]] !== original[r[0]]); }
 function refreshButtons() {
   const on = !!dev && !busy;
-  $('load').disabled = !on; $('calWrite').disabled = !on;
+  $('load').disabled = !on; $('calWrite').disabled = !on; $('wake').disabled = !on;
   $('apply').disabled = !on || !dirty(); $('revert').disabled = busy || !dirty();
   $('defaults').disabled = !dev || busy || !Object.keys(original).length;
   const canPick = sel !== null && Object.keys(original).length > 0;
@@ -272,6 +281,7 @@ async function disconnect(silent) {
 $('disconnect').onclick = () => disconnect(false);
 $('connect').onclick = connect;
 $('load').onclick = loadKeys;
+$('wake').onclick = async () => { setBusy(true); try { await finishWrite(); note('ok', 'Finish command sent. Try typing on the keyboard now.'); } catch (e) { note('bad', 'Failed: ' + e.message); } setBusy(false); };
 $('revert').onclick = () => { current = { ...original }; note('', ''); drawPad(); drawPicker(); refreshButtons(); };
 $('defaults').onclick = () => { for (const r of PHYS) current[r[0]] = r[7]; note('warn', 'Vendor defaults selected. Press Apply to write them.'); drawPad(); drawPicker(); refreshButtons(); };
 
@@ -300,6 +310,7 @@ async function doApply() {
       log(`Key ${r[1]} (#${k}): 0x${h2(original[k])} -> 0x${h2(current[k])} read back 0x${h2(got)}`);
       if (got === current[k]) original[k] = got; else bad++;
     }
+    await finishWrite();
     note(bad ? 'bad' : 'ok', bad ? `${bad} key(s) did not verify. Use "Undo unsaved" or restore from your backup.` : 'Saved.');
   } catch (e) { note('bad', 'Write failed: ' + e.message); log('Error: ' + e.message); }
   drawPad(); setBusy(false);
@@ -316,7 +327,8 @@ $('bfile').onchange = async ev => {
       const a = T2 + k * 8, now = (await readBlock(a, 1))[0];
       if (now !== bytes[a]) log(`Key #${k}: 0x${h2(now)} -> 0x${h2(bytes[a])} read back 0x${h2(await writeByte(a, bytes[a]))}`);
     }
-    note('ok', 'Restored from backup. Unplug and replug the keyboard.');
+    await finishWrite();
+    note('ok', 'Restored from backup.');
     await loadKeys();
   } catch (e) { note('bad', 'Restore failed: ' + e.message); }
   setBusy(false);
@@ -335,7 +347,8 @@ $('calWrite').onclick = async () => {
       const got = await writeByte(T2 + k * 8, 0x04 + k);
       log(`key #${k} -> '${String.fromCharCode(97 + k)}' ${got === 0x04 + k ? 'OK' : 'MISMATCH'}`);
     }
-    $('calMsg').textContent = 'Done. Close this tab, replug the keyboard, reopen the page, then press "2. Start".';
+    await finishWrite();
+    $('calMsg').textContent = 'Done. Now press "2. Start" and press each key when asked (no replug needed; if keys do not type, unplug and replug once).';
   } catch (e) { $('calMsg').textContent = 'Error: ' + e.message; }
   setBusy(false);
 };

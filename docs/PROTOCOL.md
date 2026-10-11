@@ -58,3 +58,7 @@ Typical read: `cmd=5` request, then `GetFeature` with first byte `7`; the answer
 - Special-function codes the app can assign to a key (skin_main.ini): Vol-, Vol+, Previous, Next, Player, Mail, WWW Forward/Stop/Back/Refresh/Search/Favourite, Mute, My Computer, Stop, Calculator, Web Browser, Full-key Lock, LED mode/color/speed/brightness/on-off, Roll Up/Down (knob). **No profile/layer switch function is listed.**
 - `KBconfig.ini` has 8 rows x 20 columns (`N_M`); on the device each key owns an 8-byte slot (`0x20+8k` and `0x128+8k`), so byte j of a slot is probably row j. Only row 0 is used by default (rest 0xff). What selects the other rows is unknown.
 - Free-looking memory: `0x0320-0x03f7` (all 0xff). Could hold stored profile copies, but nothing on the keyboard would switch to them by itself.
+
+## Write session (found in vendor function 0x40fd80)
+Vendor full write: `07 09 41 00 00 00 00 00` (begin, then Sleep 200 ms) -> optional erase loop (only if a mode flag is set: `07 18 81 00 lo hi 00 60` per 0x20 bytes, Sleep 100 ms, then `07 18 00 00 00 00 00 60`) -> GetFeature(7) -> data blocks written 8 bytes at a time (cmd 3 stage, cmd 9 commit, cmd 1 end) -> **finish: `07 18 11 00 00 00 00 00`, Sleep 10 ms, `07 18 00 00 00 00 00 00`**.
+Our page never sent the finish pair, and the keyboard stopped typing after writes (until replug). The page now sends it after every write session (`finishWrite()`); there is also an "Unfreeze keyboard" button. Not yet verified on hardware.
