@@ -1,0 +1,569 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>K808 Configurator</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--ink:#1b1f24;--mute:#667085;--line:#d9dde3;--accent:#2f6fed;--accent-ink:#fff;--warn:#fff4d6;--warn-ink:#6b4e00;--ok:#e3f6e8;--ok-ink:#145a2a;--bad:#fde8e8;--bad-ink:#8a1c1c;--changed:#ffe08a;--k1:#e8344d;--k2:#9aa0ad;--k3:#f2b01e}
+@media (prefers-color-scheme:dark){:root{--bg:#14161a;--card:#1d2026;--ink:#e8eaee;--mute:#9aa3b2;--line:#323844;--accent:#6b9bff;--accent-ink:#0b1220;--warn:#3a3016;--warn-ink:#ffd978;--ok:#173323;--ok-ink:#8fe0a8;--bad:#3a1b1b;--bad-ink:#ffaaaa;--changed:#6b5a1a}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,-apple-system,Segoe UI,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:16px}
+header{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;margin-bottom:12px}
+h1{font-size:1.4rem;margin:0}
+.chip{display:inline-block;padding:2px 10px;border-radius:99px;font-size:.85rem;background:var(--line);color:var(--mute)}
+.chip.on{background:var(--ok);color:var(--ok-ink)}
+button{font:inherit;padding:.55rem 1rem;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink);cursor:pointer}
+button.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+button:disabled{opacity:.45;cursor:not-allowed}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px}
+.banner{padding:10px 14px;border-radius:10px;margin-bottom:12px}
+.banner.warn{background:var(--warn);color:var(--warn-ink)}.banner.ok{background:var(--ok);color:var(--ok-ink)}.banner.bad{background:var(--bad);color:var(--bad-ink)}
+.cols{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:14px}
+@media(max-width:760px){.cols{grid-template-columns:1fr}}
+.pad{display:grid;grid-template-columns:repeat(5,1fr);grid-template-rows:repeat(3,76px);gap:8px;padding:14px;background:#22252b;border-radius:14px}
+.key{border:2px solid transparent;border-radius:10px;background:var(--k2);color:#12141a;display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1.15;padding:2px;text-align:center}
+.key small{font-size:.7rem;opacity:.7}.key b{font-size:1.05rem;word-break:break-all}
+.key.red{background:var(--k1);color:#fff}.key.yellow{background:var(--k3)}
+.key.target{outline:4px solid #00e5ff;animation:pulse 1s infinite}@keyframes pulse{50%{outline-color:transparent}}
+.key.lit{background:#00e5ff!important;color:#00323a!important;box-shadow:0 0 18px 6px #00e5ff;animation:glow 1s infinite}@keyframes glow{50%{box-shadow:0 0 4px 1px #00e5ff}}
+.key.dim{opacity:.35}
+.key.changed{outline:3px solid var(--changed)}.key.sel{border-color:#fff;box-shadow:0 0 0 3px var(--accent)}
+.knob{grid-column:1;grid-row:3;align-self:end;justify-self:start;width:52px;height:52px;border-radius:50%;background:radial-gradient(#d8dbe0,#8d929c);border:0;margin:0 0 4px 4px;padding:0;font-size:.65rem;color:#222}
+.groups button{margin:2px;padding:.3rem .6rem;font-size:.9rem}
+.picker{max-height:260px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:6px;margin-top:8px}
+input[type=text],select{font:inherit;padding:.4rem .6rem;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink);width:100%}
+details{margin-top:6px}pre{background:#0f1115;color:#9fe3a9;padding:12px;border-radius:8px;max-height:240px;overflow:auto;white-space:pre-wrap;font-size:.8rem}
+.row{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.mute{color:var(--mute);font-size:.9rem}
+</style><script src="version.js" onerror="window.APP_VERSION=null"></script>
+</head><body><div class="wrap">
+<header>
+  <div><h1>K808 Configurator (advanced)</h1><span id="status" class="chip">Not connected</span></div>
+  <div><button id="connect" class="primary">Connect keyboard</button> <button id="disconnect">Disconnect</button> <button id="report">Copy debug report</button></div>
+</header>
+
+<div id="support" class="banner bad" hidden>This browser can't talk to USB keyboards. Use Chrome or Edge on a computer.</div>
+<div id="mapWarn" class="banner warn" hidden>The key order below is the vendor's default and hasn't been checked on your keyboard. <button id="calOpen">Check it now (calibrate)</button></div>
+<div id="note" class="banner" hidden></div>
+
+<div class="cols">
+  <section class="card">
+    <h2 style="margin:0 0 8px;font-size:1.05rem">Your keys <span class="mute">(click a key to change it)</span></h2>
+    <div id="pad" class="pad"></div>
+    <div class="row">
+      <button id="load" disabled>Load from keyboard</button>
+      <button id="revert" disabled>Undo unsaved</button>
+      <button id="defaults" disabled>Vendor defaults</button>
+      <button id="apply" class="primary" disabled>Apply to keyboard</button>
+      <button id="wake" disabled title="Sends the vendor app's finish command. Use if the keyboard stopped typing.">Unfreeze keyboard</button>
+    </div>
+    <label class="mute" style="display:block;margin-top:8px"><input id="backupChk" type="checkbox" checked> Download a backup file (only once per page visit)</label>
+    <label class="mute" style="display:block"><input id="autoDisc" type="checkbox" checked> Disconnect automatically after Apply</label>
+    <p class="mute" style="margin-bottom:0">A backup file is saved before writing. If keys stop typing after Apply, press Disconnect; if they still don't work, unplug and replug.</p>
+  </section>
+
+  <section class="card">
+    <h2 id="selTitle" style="margin:0 0 8px;font-size:1.05rem">Pick a key on the left</h2>
+    <input id="search" type="text" placeholder="Search: a, enter, f5, up, 0x2c ..." disabled>
+    <div id="groups" class="groups" style="margin-top:8px"></div>
+    <div id="picker" class="picker"><span class="mute">Nothing selected.</span></div>
+    <div class="row"><label class="mute" style="flex:1">Custom code (hex) <input id="custom" type="text" placeholder="0x2c" disabled></label><button id="customSet" disabled>Use</button></div>
+  </section>
+</div>
+
+<section class="card">
+  <h2 style="margin:0 0 6px;font-size:1.05rem">Profiles <span class="mute">(saved in this browser; export a file to keep or move them)</span></h2>
+  <div class="row" style="margin-top:0"><input id="pname" type="text" placeholder="Profile name, e.g. Gaming" style="flex:1;min-width:160px"><button id="psave" disabled>Save current keys as profile</button></div>
+  <div id="plist" style="margin-top:10px"></div>
+  <div class="row"><button id="pexport">Export profiles</button><label class="mute">Import profiles <input id="pimport" type="file" accept=".json"></label></div>
+</section>
+
+<section class="card">
+  <h2 style="margin:0 0 6px;font-size:1.05rem">Test my keys</h2>
+  <p class="mute" style="margin-top:0">Checks that each physical key types what this page shows. Nothing is written to the keyboard.</p>
+  <ol class="mute" style="margin:4px 0 8px;padding-left:20px"><li>Connect the keyboard (keys appear above).</li><li>Click <b>Start test</b>.</li><li>A small keyboard picture appears below. Press the <b style="color:#00a5bd">glowing</b> key on your real keyboard. 12 times.</li></ol>
+  <div class="row" style="margin-top:0"><button id="lcStart">Start test</button><button id="lcUse" disabled>Fix the picture to match my keyboard</button></div>
+  <p id="lcMsg" style="font-weight:600;margin:8px 0 0"></p>
+  <p class="mute" style="margin:4px 0">Last key this page heard: <b id="lcHeard">none yet</b> <span id="lcHint" style="color:var(--bad-ink)"></span></p>
+  <div id="lcPad" class="pad" style="grid-template-rows:repeat(3,54px);max-width:420px;margin:8px 0" hidden></div>
+  <div id="lcRes"></div>
+  <details><summary>Technical details</summary><pre id="lcOut" style="max-height:220px"></pre></details>
+</section>
+
+<section id="calBox" class="card" hidden>
+  <h2 style="margin:0 0 6px;font-size:1.05rem">Check the key order (calibrate)</h2>
+  <p>This gives every key its own letter (a to l), then asks you to press each physical key. Step 1 needs the keyboard connected.</p>
+  <div class="row"><button id="calWrite" disabled>1. Write test letters</button><button id="calStart">2. Start (after replug)</button><button id="calForget">Forget saved order</button><button id="calClose">Close</button></div>
+  <p id="calMsg" style="font-weight:600"></p>
+</section>
+
+<section class="card">
+  <h2 style="margin:0 0 6px;font-size:1.05rem">More</h2>
+  <div class="row">
+    <label class="mute">Restore keys from a backup file <input id="bfile" type="file" accept=".json"></label>
+    <a href="dev.html" style="align-self:center">Developer tools</a>
+  </div>
+  <details><summary>Log</summary><pre id="log"></pre></details>
+</section>
+</div>
+
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+const logEl = $('log');
+const logLines = [];
+const log = t => { logLines.push(new Date().toISOString().slice(11, 23) + ' ' + t); logEl.textContent += t + '\n'; logEl.scrollTop = logEl.scrollHeight; };
+window.addEventListener('error', e => log('PAGE ERROR: ' + e.message));
+window.addEventListener('unhandledrejection', e => log('PAGE ERROR: ' + (e.reason && e.reason.message || e.reason)));
+const h2 = n => n.toString(16).padStart(2, '0');
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// ---------- key names ----------
+const NAMES = { 0x28: 'Enter', 0x29: 'Esc', 0x2a: 'Backspace', 0x2b: 'Tab', 0x2c: 'Space', 0x2d: '-', 0x2e: '=', 0x2f: '[', 0x30: ']',
+  0x31: '\\', 0x33: ';', 0x34: "'", 0x35: '`', 0x36: ',', 0x37: '.', 0x38: '/', 0x39: 'CapsLock',
+  0x49: 'Insert', 0x4a: 'Home', 0x4b: 'PgUp', 0x4c: 'Delete', 0x4d: 'End', 0x4e: 'PgDn', 0x4f: 'Right', 0x50: 'Left', 0x51: 'Down', 0x52: 'Up',
+  0x53: 'NumLock', 0x54: 'KP /', 0x55: 'KP *', 0x56: 'KP -', 0x57: 'KP +', 0x58: 'KP Enter', 0x62: 'KP 0', 0x63: 'KP .', 0xff: '(none)' };
+for (let i = 0; i < 26; i++) NAMES[0x04 + i] = String.fromCharCode(65 + i);
+for (let i = 0; i < 9; i++) NAMES[0x1e + i] = String(i + 1);
+NAMES[0x27] = '0';
+for (let i = 0; i < 12; i++) NAMES[0x3a + i] = 'F' + (i + 1);
+for (let i = 0; i < 9; i++) NAMES[0x59 + i] = 'KP ' + (i + 1);
+['LCtrl', 'LShift', 'LAlt', 'LWin', 'RCtrl', 'RShift', 'RAlt', 'RWin'].forEach((n, i) => NAMES[0xe0 + i] = n);
+const nm = c => NAMES[c] || ('0x' + h2(c));
+const range = (a, b) => Array.from({ length: b - a + 1 }, (_, i) => a + i);
+const GROUPS = {
+  Letters: range(0x04, 0x1d), Numbers: range(0x1e, 0x27),
+  Editing: [0x28, 0x29, 0x2a, 0x2b, 0x2c, 0x4c, 0x49, 0x39],
+  Arrows: [0x52, 0x51, 0x50, 0x4f, 0x4a, 0x4d, 0x4b, 0x4e],
+  Symbols: [0x2d, 0x2e, 0x2f, 0x30, 0x31, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38],
+  'F keys': range(0x3a, 0x45), Keypad: range(0x53, 0x63), Modifiers: range(0xe0, 0xe7),
+};
+
+// ---------- keyboard layout ----------
+// [default key#, label, col, row, colspan, rowspan, colour, vendor default code]
+const PHYS = [
+  [0, '1', 1, 1, 1, 1, 'red', 0x1e], [1, '2', 2, 1, 1, 1, '', 0x1f], [2, '3', 3, 1, 1, 1, '', 0x20], [3, '4', 4, 1, 1, 1, '', 0x21], [4, '5', 5, 1, 1, 1, '', 0x22],
+  [9, '6', 1, 2, 1, 1, '', 0x23], [8, '7', 2, 2, 1, 1, '', 0x24], [7, '8', 3, 2, 1, 1, '', 0x25], [6, '9', 4, 2, 1, 1, '', 0x26], [5, 'Enter', 5, 2, 1, 2, 'red', 0x28],
+  [10, '0', 2, 3, 2, 1, 'yellow', 0x27], [11, '.', 4, 3, 1, 1, 'red', 0x35],
+];
+let savedMap = null;
+try { savedMap = JSON.parse(localStorage.getItem('k808map') || 'null'); } catch (e) {}
+if (savedMap) for (const r of PHYS) if (savedMap[r[1]] !== undefined) r[0] = savedMap[r[1]];
+$('mapWarn').hidden = !!savedMap;
+
+// ---------- WebHID protocol ----------
+const T2 = 0x128;
+let dev = null, featLen = 0, busy = false;
+function pkt(cmd, idx, lo, hi, data, last) {
+  const b = new Uint8Array(featLen);
+  b[0] = 0x18; b[1] = cmd; b[2] = idx; b[3] = lo; b[4] = hi; b[5] = data; b[6] = last;
+  return b;
+}
+const isK808 = d => d.vendorId === 0x30fa && d.productId === 0x2350;
+// The keyboard can drop off USB for a moment while it saves (seen on real hardware), so reopen when needed.
+async function reopen(timeoutMs) {
+  const end = Date.now() + timeoutMs;
+  while (Date.now() < end) {
+    const d = (await navigator.hid.getDevices()).find(isK808);
+    if (d) { try { if (!d.opened) await d.open(); dev = d; log('Reconnected to the keyboard.'); return; } catch (e) { /* not ready yet */ } }
+    await sleep(300);
+  }
+  throw new Error('The keyboard did not come back. Unplug and replug it, then reload this page.');
+}
+async function send(b) {
+  if (!dev) throw new Error('Not connected.');
+  if (!dev.opened) await reopen(10000);
+  return dev.sendFeatureReport(7, b);
+}
+async function readBlock(addr, n) {
+  const lo = addr & 0xff, hi = (addr >> 8) & 0xff, out = [];
+  for (let i = 0; i < n; i++) await send(pkt(3, i, lo, hi, 0, (n - 1) & 0xff));
+  await sleep(1); await send(pkt(0, 0, lo, hi, 0, 0)); await sleep(1);
+  for (let i = 0; i < n; i++) {
+    await send(pkt(5, i, lo, hi, 0, (n - 1) & 0xff)); await sleep(1);
+    if (!dev.opened) await reopen(10000);
+    out.push((await dev.receiveFeatureReport(7)).getUint8(1));
+  }
+  await sleep(1); await send(pkt(1, 0, 0, 0, 0, 0));
+  return out;
+}
+// Vendor-style session start (found in the vendor app): 07 09 41 00 ..., wait 200 ms, then one read.
+async function beginWrite() {
+  const b = new Uint8Array(featLen); b[0] = 0x09; b[1] = 0x41;
+  await send(b); await sleep(200);
+  try { await dev.receiveFeatureReport(7); } catch (e) { /* vendor reads status here; ignore */ }
+  log('Sent begin (07 09 41 00).');
+}
+async function writeByteRaw(addr, val) {
+  const lo = addr & 0xff, hi = (addr >> 8) & 0xff;
+  await send(pkt(3, 0, lo, hi, val, 0)); await sleep(2);
+  await send(pkt(9, 0, lo, hi, 0, 0)); await sleep(10);
+  await send(pkt(1, 0, lo, hi, 0, 0)); await sleep(10);
+}
+async function writeByte(addr, val) {
+  const lo = addr & 0xff, hi = (addr >> 8) & 0xff;
+  await send(pkt(3, 0, lo, hi, val, 0)); await sleep(2);
+  await send(pkt(9, 0, lo, hi, 0, 0)); await sleep(10);
+  await send(pkt(1, 0, lo, hi, 0, 0)); await sleep(10);
+  await sleep(400);
+  return (await readBlock(addr, 1))[0];
+}
+
+// The vendor app ends every write session with cmd 0x11 then cmd 0 (found in its code, function 0x40fd80).
+// Without it the keyboard stays in programming mode and stops typing until replugged.
+async function finishWrite() {
+  await send(pkt(0x11, 0, 0, 0, 0, 0)); await sleep(10);
+  await send(pkt(0, 0, 0, 0, 0, 0)); await sleep(10);
+  log('Sent finish (0x11, 0).');
+}
+
+// ---------- state ----------
+let current = {}, original = {}, sel = null, backedUp = false;   // key# -> code
+let filter = 'Letters';
+
+function note(kind, text) { const n = $('note'); n.hidden = !text; n.className = 'banner ' + kind; n.textContent = text || ''; }
+function setBusy(b) { busy = b; refreshButtons(); }
+function dirty() { return PHYS.some(r => current[r[0]] !== undefined && current[r[0]] !== original[r[0]]); }
+function refreshButtons() {
+  const on = !!dev && !busy;
+  $('load').disabled = !on; $('calWrite').disabled = !on; $('wake').disabled = !on;
+  $('apply').disabled = !on || !dirty(); $('revert').disabled = busy || !dirty();
+  $('defaults').disabled = !dev || busy || !Object.keys(original).length;
+  const canPick = sel !== null && Object.keys(original).length > 0;
+  $('psave').disabled = !Object.keys(original).length;
+  $('search').disabled = !canPick; $('custom').disabled = !canPick; $('customSet').disabled = !canPick;
+}
+function drawPad() {
+  const pad = $('pad'); pad.innerHTML = '';
+  for (const [k, label, col, row, cs, rs, color] of PHYS) {
+    const b = document.createElement('button');
+    b.className = 'key ' + color + (current[k] !== original[k] && current[k] !== undefined ? ' changed' : '') + (sel === k ? ' sel' : '') + (typeof lcTarget !== 'undefined' && lcTarget === label ? ' target' : '');
+    b.style.cssText = `grid-column:${col}/span ${cs};grid-row:${row}/span ${rs}`;
+    b.innerHTML = `<small>${label}</small><b>${current[k] === undefined ? '?' : nm(current[k])}</b>`;
+    b.onclick = () => { sel = k; $('selTitle').textContent = `Key "${label}" sends: ${current[k] === undefined ? '?' : nm(current[k])}`; drawPicker(); drawPad(); refreshButtons(); };
+    pad.appendChild(b);
+  }
+  const knob = document.createElement('div'); knob.className = 'key knob'; knob.textContent = 'knob'; knob.title = 'Knob editing comes later'; pad.appendChild(knob);
+}
+function drawPicker() {
+  const g = $('groups'); g.innerHTML = '';
+  for (const name of Object.keys(GROUPS)) {
+    const b = document.createElement('button'); b.textContent = name;
+    if (name === filter && !$('search').value) b.className = 'primary';
+    b.onclick = () => { filter = name; $('search').value = ''; drawPicker(); };
+    g.appendChild(b);
+  }
+  const q = $('search').value.trim().toLowerCase();
+  let codes = GROUPS[filter];
+  if (q) {
+    const all = Object.values(GROUPS).flat();
+    const rank = c => { const n = nm(c).toLowerCase(); return n === q || ('0x' + h2(c)) === q ? 0 : n.startsWith(q) ? 1 : n.includes(q) ? 2 : 3; };
+    codes = [...new Set(all)].filter(c => rank(c) < 3).sort((a, b) => rank(a) - rank(b));
+  }
+  const p = $('picker'); p.innerHTML = '';
+  if (sel === null) { p.innerHTML = '<span class="mute">Nothing selected.</span>'; return; }
+  for (const c of codes) {
+    const b = document.createElement('button'); b.style.cssText = 'margin:2px;padding:.3rem .6rem;min-width:44px';
+    b.textContent = nm(c); b.title = '0x' + h2(c);
+    if (current[sel] === c) b.className = 'primary';
+    b.onclick = () => setKey(c);
+    p.appendChild(b);
+  }
+  if (!codes.length) p.innerHTML = '<span class="mute">No match.</span>';
+}
+function setKey(c) {
+  if (sel === null) return;
+  current[sel] = c;
+  const r = PHYS.find(x => x[0] === sel);
+  $('selTitle').textContent = `Key "${r[1]}" sends: ${nm(c)}`;
+  note('', ''); drawPicker(); drawPad(); refreshButtons();
+}
+$('search').oninput = drawPicker;
+$('customSet').onclick = () => {
+  const v = parseInt($('custom').value, 16);
+  if (Number.isNaN(v) || v < 0 || v > 0xff) return note('bad', 'Custom code must be hex between 0x00 and 0xff.');
+  setKey(v);
+};
+
+// ---------- connect / load ----------
+function featureDataLength(col) {
+  const r = col.featureReports.find(f => f.reportId === 7); if (!r) return 0;
+  return r.items.reduce((s, it) => s + (it.reportSize || 0) * (it.reportCount || 0), 0) / 8;
+}
+async function loadKeys() {
+  setBusy(true);
+  try {
+    original = {}; current = {};
+    for (const r of PHYS) { const v = (await readBlock(T2 + r[0] * 8, 1))[0]; original[r[0]] = v; current[r[0]] = v; }
+    note('ok', 'Loaded your keys from the keyboard.');
+    drawPad(); drawPicker(); drawProfiles();
+  } catch (e) { note('bad', 'Could not read the keyboard: ' + e.message); log('Error: ' + e.message); }
+  setBusy(false);
+}
+async function connect() {
+  try {
+    let devs = (await navigator.hid.getDevices()).filter(d => d.vendorId === 0x30fa && d.productId === 0x2350);
+    if (!devs.length) devs = await navigator.hid.requestDevice({ filters: [{ vendorId: 0x30fa, productId: 0x2350 }] });
+    if (!devs.length) return;
+    dev = devs[0]; if (!dev.opened) await dev.open();
+    const col = dev.collections.find(c => c.usagePage === 0xff01);
+    if (!col) { await disconnect(true); return note('bad', 'This device has no 0xFF01 interface. Is it the K808?'); }
+    featLen = featureDataLength(col);
+    if (featLen < 7) { await disconnect(true); return note('bad', 'Unexpected report size ' + featLen); }
+    $('status').textContent = 'Connected: ' + (dev.productName || 'keyboard'); $('status').className = 'chip on';
+    $('connect').disabled = true;
+    log('Connected, feature report length ' + featLen);
+    refreshButtons(); await loadKeys();
+  } catch (e) { note('bad', 'Connect failed: ' + e.message); log('Error: ' + e.message); }
+}
+async function disconnect(silent) {
+  try {
+    const all = (await navigator.hid.getDevices()).filter(d => d.vendorId === 0x30fa && d.productId === 0x2350);
+    if (dev && !all.includes(dev)) all.push(dev);
+    for (const d of all) if (d.opened) await d.close();
+  } catch (e) { log('Close error: ' + e.message); }
+  dev = null;
+  $('status').textContent = 'Not connected'; $('status').className = 'chip';
+  $('connect').disabled = false;
+  if (!silent) note('ok', 'Disconnected. Try typing on the keyboard. To change keys again, press Connect (no popup needed).');
+  refreshButtons();
+}
+$('disconnect').onclick = () => disconnect(false);
+$('connect').onclick = connect;
+$('load').onclick = loadKeys;
+$('wake').onclick = async () => { setBusy(true); try { await finishWrite(); note('ok', 'Finish command sent. Try typing on the keyboard now.'); } catch (e) { note('bad', 'Failed: ' + e.message); } setBusy(false); };
+$('revert').onclick = () => { current = { ...original }; note('', ''); drawPad(); drawPicker(); refreshButtons(); };
+$('defaults').onclick = () => { for (const r of PHYS) current[r[0]] = r[7]; note('warn', 'Vendor defaults selected. Press Apply to write them.'); drawPad(); drawPicker(); refreshButtons(); };
+
+// ---------- backup / apply ----------
+async function downloadBackup(name) {
+  const data = new Array(0x400).fill(0xff);
+  for (const base of [0x20, T2]) for (let k = 0; k < 14; k++) data[base + k * 8] = (await readBlock(base + k * 8, 1))[0];
+  const blob = new Blob([JSON.stringify({ vid: 0x30fa, pid: 0x2350, start: 0, partial: 'key tables only', hex: data.map(h2).join('') })], { type: 'application/json' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click();
+  log('Backup downloaded: ' + name);
+}
+async function doApply() {
+  if (!PHYS.some(r => current[r[0]] !== original[r[0]])) {
+    note('warn', 'Nothing to write: the keyboard already has exactly these keys. Change a key (or pick a different profile) first.');
+    return;
+  }
+  setBusy(true);
+  try {
+    // safety copy of the keys as they are now: always kept as a profile, no file needed
+    const safe = { name: '(before last apply)', keys: {} };
+    for (const r of PHYS) safe.keys[r[1]] = original[r[0]];
+    const si = profiles.findIndex(x => x.name === safe.name); if (si >= 0) profiles[si] = safe; else profiles.push(safe);
+    saveProfiles(); drawProfiles();
+    if ($('backupChk').checked && !backedUp) { await downloadBackup('k808-backup-' + new Date().toISOString().replace(/[:.]/g, '-') + '.json'); backedUp = true; }
+    let bad = 0;
+    const todo = PHYS.filter(r => current[r[0]] !== original[r[0]]);
+    await beginWrite();
+    for (const r of todo) { await writeByteRaw(T2 + r[0] * 8, current[r[0]]); log(`Wrote key ${r[1]} (#${r[0]}): 0x${h2(original[r[0]])} -> 0x${h2(current[r[0]])}`); }
+    await finishWrite();
+    await sleep(500);
+    for (const r of todo) {
+      const got = (await readBlock(T2 + r[0] * 8, 1))[0];
+      log(`Check key ${r[1]}: read back 0x${h2(got)}`);
+      if (got === current[r[0]]) original[r[0]] = got; else bad++;
+    }
+    note(bad ? 'bad' : 'ok', bad ? `${bad} key(s) did not verify. Use "Undo unsaved" or restore from your backup.` : 'Saved.');
+  } catch (e) { note('bad', 'Write failed: ' + e.message); log('Error: ' + e.message); }
+  drawPad(); drawProfiles(); setBusy(false);
+  if ($('autoDisc').checked) { await disconnect(true); const n = $('note'); n.textContent += ' Keyboard disconnected from this page; test typing now. If keys still do not type, unplug and replug once.'; }
+}
+$('apply').onclick = doApply;
+$('bfile').onchange = async ev => {
+  if (!dev) return note('warn', 'Connect the keyboard first, then choose the file.');
+  setBusy(true);
+  try {
+    const f = ev.target.files[0]; if (!f) return;
+    const j = JSON.parse(await f.text()), bytes = j.hex.match(/../g).map(x => parseInt(x, 16));
+    for (let k = 0; k < 12; k++) {
+      const a = T2 + k * 8, now = (await readBlock(a, 1))[0];
+      if (now !== bytes[a]) log(`Key #${k}: 0x${h2(now)} -> 0x${h2(bytes[a])} read back 0x${h2(await writeByte(a, bytes[a]))}`);
+    }
+    await finishWrite();
+    note('ok', 'Restored from backup.');
+    await loadKeys();
+  } catch (e) { note('bad', 'Restore failed: ' + e.message); }
+  setBusy(false);
+};
+
+// ---------- calibration ----------
+const ORDER = PHYS.map(r => r[1]);
+$('calOpen').onclick = () => { $('calBox').hidden = false; };
+$('calClose').onclick = () => { $('calBox').hidden = true; };
+$('calForget').onclick = () => { try { localStorage.removeItem('k808map'); } catch (e) {} $('calMsg').textContent = 'Saved order forgotten. Reload the page.'; };
+$('calWrite').onclick = async () => {
+  setBusy(true);
+  try {
+    await downloadBackup('k808-backup-before-calibration.json');
+    for (let k = 0; k < 12; k++) {
+      const got = await writeByte(T2 + k * 8, 0x04 + k);
+      log(`key #${k} -> '${String.fromCharCode(97 + k)}' ${got === 0x04 + k ? 'OK' : 'MISMATCH'}`);
+    }
+    await finishWrite();
+    $('calMsg').textContent = 'Done. Now press "2. Start" and press each key when asked (no replug needed; if keys do not type, unplug and replug once).';
+  } catch (e) { $('calMsg').textContent = 'Error: ' + e.message; }
+  setBusy(false);
+};
+$('calStart').onclick = () => {
+  const found = {}; let n = 0;
+  const ask = () => { $('calMsg').textContent = `Press the physical key: ${ORDER[n]}  (${n + 1}/${ORDER.length})`; };
+  const onKey = ev => {
+    const m = /^Key([A-L])$/.exec(ev.code);
+    if (!m) { $('calMsg').textContent = `Got ${ev.code}, expected a letter a-l. Press the key: ${ORDER[n]}`; return; }
+    ev.preventDefault();
+    found[ORDER[n]] = m[1].charCodeAt(0) - 65; n++;
+    if (n === ORDER.length) {
+      window.removeEventListener('keydown', onKey, true);
+      try { localStorage.setItem('k808map', JSON.stringify(found)); } catch (e) {}
+      $('calMsg').textContent = 'Saved! Reload the page. Then set the keys back to what you want (the keyboard still has the test letters).';
+      log('Calibrated map: ' + JSON.stringify(found));
+    } else ask();
+  };
+  window.addEventListener('keydown', onKey, true); ask();
+};
+
+
+// ---------- profiles (stored by physical key label) ----------
+let profiles = [];
+try { profiles = JSON.parse(localStorage.getItem('k808profiles') || '[]'); } catch (e) {}
+const saveProfiles = () => { try { localStorage.setItem('k808profiles', JSON.stringify(profiles)); } catch (e) { note('warn', 'Could not save in this browser (private mode?). Use Export.'); } };
+function keysByLabel() { const o = {}; for (const r of PHYS) if (current[r[0]] !== undefined) o[r[1]] = current[r[0]]; return o; }
+function loadProfileToEditor(pr) {
+  if (!Object.keys(original).length) { note('warn', 'Connect the keyboard first so I can load its current keys.'); return false; }
+  for (const r of PHYS) if (pr.keys[r[1]] !== undefined) current[r[0]] = pr.keys[r[1]];
+  drawPad(); drawPicker(); refreshButtons(); return true;
+}
+function drawProfiles() {
+  const box = $('plist'); box.innerHTML = '';
+  if (!profiles.length) { box.innerHTML = '<span class="mute">No profiles yet. Set your keys, type a name above, and save.</span>'; return; }
+  profiles.forEach((pr, i) => {
+    const row = document.createElement('div'); row.className = 'row'; row.style.cssText = 'align-items:center;margin:6px 0';
+    const label = document.createElement('div'); label.style.cssText = 'flex:1;min-width:140px';
+    const same = Object.keys(original).length && PHYS.every(r => (pr.keys[r[1]] ?? original[r[0]]) === original[r[0]]);
+    label.innerHTML = `<b></b> <span class="mute">${PHYS.map(r => nm(pr.keys[r[1]] ?? 0xff)).join(' ')}</span> ${same ? '<span class="chip on">already on keyboard</span>' : ''}`;
+    label.querySelector('b').textContent = pr.name;
+    const mk = (t, fn, cls) => { const b = document.createElement('button'); b.textContent = t; if (cls) b.className = cls; b.onclick = fn; return b; };
+    row.append(label,
+      mk('Load into editor', () => { if (loadProfileToEditor(pr)) note('', 'Profile "' + pr.name + '" loaded. Check it, then press Apply to keyboard.'); }),
+      mk('Apply now', async () => { if (loadProfileToEditor(pr)) await doApply(); }, 'primary'),
+      mk('Delete', () => { if (confirm('Delete profile "' + pr.name + '"?')) { profiles.splice(i, 1); saveProfiles(); drawProfiles(); } }));
+    box.appendChild(row);
+  });
+}
+$('psave').onclick = () => {
+  const name = $('pname').value.trim();
+  if (!name) return note('warn', 'Type a profile name first.');
+  const pr = { name, keys: keysByLabel() }, i = profiles.findIndex(x => x.name === name);
+  if (i >= 0) profiles[i] = pr; else profiles.push(pr);
+  saveProfiles(); drawProfiles(); $('pname').value = ''; note('ok', 'Profile "' + name + '" saved.');
+};
+$('pexport').onclick = () => {
+  const blob = new Blob([JSON.stringify({ k808profiles: 1, profiles }, null, 1)], { type: 'application/json' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'k808-profiles.json'; a.click();
+};
+$('pimport').onchange = async ev => {
+  try {
+    const f = ev.target.files[0]; if (!f) return;
+    const j = JSON.parse(await f.text());
+    if (!j.profiles || !Array.isArray(j.profiles)) throw new Error('not a profiles file');
+    for (const pr of j.profiles) { if (!pr.name || !pr.keys) continue; const i = profiles.findIndex(x => x.name === pr.name); if (i >= 0) profiles[i] = pr; else profiles.push(pr); }
+    saveProfiles(); drawProfiles(); note('ok', 'Profiles imported.');
+  } catch (e) { note('bad', 'Import failed: ' + e.message); }
+};
+
+// ---------- live check ----------
+const CODEMAP = { 0x28: 'Enter', 0x29: 'Escape', 0x2a: 'Backspace', 0x2b: 'Tab', 0x2c: 'Space', 0x2d: 'Minus', 0x2e: 'Equal', 0x2f: 'BracketLeft', 0x30: 'BracketRight',
+  0x31: 'Backslash', 0x33: 'Semicolon', 0x34: 'Quote', 0x35: 'Backquote', 0x36: 'Comma', 0x37: 'Period', 0x38: 'Slash', 0x39: 'CapsLock',
+  0x49: 'Insert', 0x4a: 'Home', 0x4b: 'PageUp', 0x4c: 'Delete', 0x4d: 'End', 0x4e: 'PageDown', 0x4f: 'ArrowRight', 0x50: 'ArrowLeft', 0x51: 'ArrowDown', 0x52: 'ArrowUp',
+  0x53: 'NumLock', 0x54: 'NumpadDivide', 0x55: 'NumpadMultiply', 0x56: 'NumpadSubtract', 0x57: 'NumpadAdd', 0x58: 'NumpadEnter', 0x62: 'Numpad0', 0x63: 'NumpadDecimal',
+  0xe0: 'ControlLeft', 0xe1: 'ShiftLeft', 0xe2: 'AltLeft', 0xe3: 'MetaLeft', 0xe4: 'ControlRight', 0xe5: 'ShiftRight', 0xe6: 'AltRight', 0xe7: 'MetaRight' };
+for (let i = 0; i < 26; i++) CODEMAP[0x04 + i] = 'Key' + String.fromCharCode(65 + i);
+for (let i = 0; i < 9; i++) { CODEMAP[0x1e + i] = 'Digit' + (i + 1); CODEMAP[0x59 + i] = 'Numpad' + (i + 1); }
+CODEMAP[0x27] = 'Digit0';
+for (let i = 0; i < 12; i++) CODEMAP[0x3a + i] = 'F' + (i + 1);
+const USAGE_OF = {}; for (const [u, c] of Object.entries(CODEMAP)) USAGE_OF[c] = parseInt(u, 10);
+let lcFound = null, lcTarget = null, lcTimer = null;
+window.addEventListener('keydown', ev => {
+  $('lcHeard').textContent = ev.code + (ev.key && ev.key.length === 1 ? ' ("' + ev.key + '")' : '');
+  $('lcHint').textContent = ''; clearTimeout(lcTimer);
+}, true);
+function lcWatch() {
+  clearTimeout(lcTimer);
+  lcTimer = setTimeout(() => { $('lcHint').textContent = '  No key heard yet. Click an empty part of this page once, then press the key. Does the keyboard type in Notepad/TextEdit? If not, unplug and replug it.'; }, 6000);
+}
+function drawMini() {
+  const m = $('lcPad'); m.innerHTML = '';
+  if (lcTarget === null) { m.hidden = true; return; }
+  m.hidden = false;
+  for (const [k, label, col, row, cs, rs, color] of PHYS) {
+    const d = document.createElement('div');
+    d.className = 'key ' + color + (lcTarget === label ? ' lit' : ' dim');
+    d.style.cssText = `grid-column:${col}/span ${cs};grid-row:${row}/span ${rs}`;
+    d.innerHTML = `<b>${label}</b>`;
+    m.appendChild(d);
+  }
+}
+
+$('lcStart').onclick = async () => {
+  const out = $('lcOut'), msg = $('lcMsg'), res = $('lcRes'); out.textContent = ''; res.innerHTML = ''; lcFound = null; $('lcUse').disabled = true;
+  if (!dev || !Object.keys(original).length) { msg.textContent = 'Please click "Connect keyboard" at the top first.'; return; }
+  setBusy(true);
+  let t1 = {};
+  try { for (let k = 0; k < 12; k++) t1[k] = (await readBlock(0x20 + k * 8, 1))[0]; } catch (e) { out.textContent += 'Could not read table 0x0020: ' + e.message + '\n'; }
+  setBusy(false);
+  const found = {}, rows = [], results = []; let n = 0, hit1 = 0, hit2 = 0;
+  const ask = () => { lcTarget = ORDER[n]; drawPad(); drawMini(); msg.textContent = `Step ${n + 1} of ${ORDER.length}: PRESS the key '${ORDER[n]}' on your real keyboard (clicking with the mouse does nothing). It glows below.`; window.focus(); lcWatch(); };
+  const onKey = ev => {
+    if (ev.repeat) return;
+    ev.preventDefault();
+    const u = USAGE_OF[ev.code], label = ORDER[n];
+    const in2 = Object.keys(original).filter(k => original[k] === u).map(Number);
+    const in1 = Object.keys(t1).filter(k => t1[k] === u).map(Number);
+    if (in2.length) hit2++; if (in1.length) hit1++;
+    if (in2.length === 1) found[label] = in2[0];
+    const row = PHYS.find(r => r[1] === label), shown = original[row[0]];
+    results.push({ label, typed: u === undefined ? ev.code : nm(u), shown: nm(shown), ok: u === shown });
+    rows.push(`${label.padEnd(6)} typed ${String(ev.code).padEnd(14)} usage ${u === undefined ? '?   ' : '0x' + h2(u)}  table@0x0128: ${in2.length ? 'key #' + in2.join(',') : '-'}   table@0x0020: ${in1.length ? 'key #' + in1.join(',') : '-'}`);
+    out.textContent = rows.join('\n'); n++;
+    if (n < ORDER.length) return ask();
+    window.removeEventListener('keydown', onKey, true); lcTarget = null; drawPad(); drawMini();
+    const bad = results.filter(r => !r.ok);
+    msg.textContent = bad.length ? `${bad.length} of 12 keys do not match the picture.` : 'All 12 keys match the picture. Your keyboard and this page agree.';
+    msg.style.color = bad.length ? 'var(--bad-ink)' : 'var(--ok-ink)';
+    res.innerHTML = '<table style="border-collapse:collapse;margin-top:6px">' + '<tr><th align="left" style="padding:2px 10px 2px 0">Key you pressed</th><th align="left" style="padding:2px 10px 2px 0">Typed</th><th align="left" style="padding:2px 10px 2px 0">Picture says</th><th></th></tr>' +
+      results.map(r => `<tr><td style="padding:2px 10px 2px 0"><b>${r.label}</b></td><td style="padding:2px 10px 2px 0">${r.typed}</td><td style="padding:2px 10px 2px 0">${r.shown}</td><td>${r.ok ? '\u2705' : '\u274c'}</td></tr>`).join('') + '</table>';
+    if (bad.length && hit2 === 0 && hit1 === 0) res.innerHTML += '<p class="banner warn">The keyboard types things that are not in its saved key table. Send me the Technical details text.</p>';
+    else if (bad.length && Object.keys(found).length === ORDER.length) { lcFound = found; $('lcUse').disabled = false; res.innerHTML += '<p class="mute">Click <b>Fix the picture</b> and the picture will follow your real key positions.</p>'; }
+    else if (bad.length && hit1 > hit2) res.innerHTML += '<p class="banner warn">Your keyboard is using a different saved key table (0x0020). Send me the Technical details text.</p>';
+  };
+  window.addEventListener('keydown', onKey, true); ask();
+};
+$('lcUse').onclick = () => {
+  if (!lcFound) return;
+  try { localStorage.setItem('k808map', JSON.stringify(lcFound)); } catch (e) {}
+  for (const r of PHYS) if (lcFound[r[1]] !== undefined) r[0] = lcFound[r[1]];
+  $('mapWarn').hidden = true; original = {}; current = {}; sel = null;
+  note('ok', 'The picture now follows your keyboard. Reloading your keys...'); drawPad(); refreshButtons(); loadKeys();
+};
+
+$('report').onclick = async () => {
+  const v = window.APP_VERSION || {};
+  const text = ['K808 debug report', 'version: ' + (v.commit || 'unknown'), 'browser: ' + navigator.userAgent,
+    'connected: ' + !!dev + (dev ? ' opened=' + dev.opened + ' featLen=' + featLen : ''),
+    'saved key order: ' + (localStorage.getItem('k808map') || 'none'),
+    'keys in memory: ' + JSON.stringify(original), 'keys in editor: ' + JSON.stringify(current),
+    'message bar: ' + ($('note').textContent || '(empty)'), '--- log ---', ...logLines.slice(-80)].join('\n');
+  try { await navigator.clipboard.writeText(text); note('ok', 'Debug report copied. Paste it into the chat.'); }
+  catch (e) { const ta = document.createElement('textarea'); ta.value = text; ta.style.cssText = 'width:100%;height:200px'; document.body.prepend(ta); ta.select(); note('warn', 'Could not copy automatically. Select all in the box at the top of the page and copy it.'); }
+};
+
+// ---------- start ----------
+if (!('hid' in navigator)) { $('support').hidden = false; $('connect').disabled = true; }
+if ('hid' in navigator) navigator.hid.addEventListener('disconnect', e => { if (dev && e.device === dev) log('Keyboard dropped off USB (it may be restarting).'); });
+drawPad(); drawPicker(); drawProfiles(); refreshButtons();
+</script><script>
+(() => { const v = window.APP_VERSION; if (!v) return; document.title += " \u00b7 " + v.commit; document.querySelectorAll("h1").forEach(h => { const s = document.createElement("span"); s.className = "mute"; s.style.cssText = "font-size:.8rem;font-weight:400;margin-left:8px;color:#667085"; s.title = v.message + " (" + v.built + ")"; s.textContent = v.commit; h.appendChild(s); }); })();
+</script></body></html>
