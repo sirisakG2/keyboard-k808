@@ -52,3 +52,9 @@ Typical read: `cmd=5` request, then `GetFeature` with first byte `7`; the answer
   - `0x0100-0x011f`: settings/LED nibbles (unknown).
   - `0x01d8-0x023f`: repeating `07 00 40 02 00` (unknown).
   - `0x0240-0x031f`: macro data (HID codes incl. `e0` LCtrl + `04/06/16/19`, i.e. Ctrl+A/C/S/V style).
+
+## Profiles / layers (findings from the vendor app files, not verified on hardware)
+- The vendor app keeps up to 5 profiles ("Config1".."Config5", names GAME / Normal / Profile4 / Profile5, `CurConfig`) in its PC-side `config/config.ini`. Switching profile in the app rewrites the keyboard; there is no sign of an on-keyboard profile switch.
+- Special-function codes the app can assign to a key (skin_main.ini): Vol-, Vol+, Previous, Next, Player, Mail, WWW Forward/Stop/Back/Refresh/Search/Favourite, Mute, My Computer, Stop, Calculator, Web Browser, Full-key Lock, LED mode/color/speed/brightness/on-off, Roll Up/Down (knob). **No profile/layer switch function is listed.**
+- `KBconfig.ini` has 8 rows x 20 columns (`N_M`); on the device each key owns an 8-byte slot (`0x20+8k` and `0x128+8k`), so byte j of a slot is probably row j. Only row 0 is used by default (rest 0xff). What selects the other rows is unknown.
+- Free-looking memory: `0x0320-0x03f7` (all 0xff). Could hold stored profile copies, but nothing on the keyboard would switch to them by itself.
