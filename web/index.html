@@ -71,7 +71,7 @@ select,input[type=text]{font:inherit;background:#0f1418;color:var(--ink);border:
 .grid button.on{background:var(--cyan);color:#06222a;border-color:var(--cyan);font-weight:700}
 .grp{margin:10px 0 4px;color:var(--mute);font-size:.8rem;text-transform:uppercase;letter-spacing:.05em}
 .close{position:absolute;top:6px;right:10px;background:none;border:0;font-size:1.4rem;color:#fff}
-.mfoot{display:flex;justify-content:flex-end;gap:6px;margin-top:14px}
+.mfoot{display:flex;justify-content:flex-end;gap:6px;margin-top:14px;position:sticky;bottom:-16px;background:#2a2f34;padding:8px 0}
 details{margin-top:10px}pre{background:#0a0d10;color:#9fe3a9;padding:10px;border-radius:8px;max-height:220px;overflow:auto;white-space:pre-wrap;font-size:.78rem}
 .lgrid{display:grid;grid-template-columns:1fr 1.3fr 1fr;gap:20px}
 .crow{display:flex;align-items:center;gap:8px;margin:3px 0}.crow input[type=color]{width:42px;height:26px;border:0;background:none;padding:0}
@@ -254,11 +254,11 @@ for (let i = 0; i < 9; i++) NAMES[0x59 + i] = 'KP ' + (i + 1);
 const nm = c => c === undefined ? '?' : (NAMES[c] || ('0x' + h2(c)));
 const range = (a, b) => Array.from({ length: b - a + 1 }, (_, i) => a + i);
 const KEY_GROUPS = {
+  'Common (Enter, Space...)': [0x28, 0x2c, 0x29, 0x2a, 0x2b, 0x4c, 0x49, 0x39, 0x65, 0x58],
+  Arrows: [0x52, 0x51, 0x50, 0x4f, 0x4a, 0x4d, 0x4b, 0x4e],
   Letters: range(0x04, 0x1d), Numbers: range(0x1e, 0x27), 'F keys': range(0x3a, 0x45),
-  Editing: [0x28, 0x29, 0x2a, 0x2b, 0x2c, 0x4c, 0x49, 0x39, 0x65],
-  Navigation: [0x52, 0x51, 0x50, 0x4f, 0x4a, 0x4d, 0x4b, 0x4e, 0x46, 0x47, 0x48],
   Symbols: [0x2d, 0x2e, 0x2f, 0x30, 0x31, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38],
-  Keypad: range(0x53, 0x63), Modifiers: range(0xe0, 0xe7),
+  Other: [0x46, 0x47, 0x48], Keypad: range(0x53, 0x63), Modifiers: range(0xe0, 0xe7),
 };
 const MEDIA = [0xc9, 0xd8, 0xcc, 0xcd, 0xca, 0xcb, 0xd6, 0xce, 0xcf, 0xda];
 
@@ -361,7 +361,7 @@ function drawPad() {
 }
 
 // ---------- key setting dialog ----------
-let dK = null, dVal = null, dCat = 'keyboard';
+let dK = null, dVal = null, dCat = 'keyboard', dSearch = '';
 function catOf(v, k) {
   if (v === slotByK(k).def) return 'default';
   if (v === 0x00) return 'disable';
@@ -370,7 +370,7 @@ function catOf(v, k) {
 }
 function openDlg(k) {
   if (current[k] === undefined) return note('', 'Connect the keyboard first, so I can read its keys.');
-  dK = k; dVal = current[k]; dCat = catOf(dVal, k);
+  dK = k; dVal = current[k]; dCat = catOf(dVal, k); dSearch = '';
   $('dPreview').textContent = slotByK(k).label;
   $('dlg').hidden = false; drawDlg();
 }
@@ -388,7 +388,14 @@ function drawDlg() {
   if (dCat === 'default') { p('Put this key back to its factory function.'); btns([slotByK(dK).def]); }
   else if (dCat === 'disable') { p('The key does nothing. <i>(Not tested on the K808 yet.)</i>'); btns([0x00]); }
   else if (dCat === 'media') { p('Media keys. <i>These codes come from the vendor app and are not tested on the K808 yet. Try one and check it works.</i>'); btns(MEDIA); }
-  else { for (const [g, codes] of Object.entries(KEY_GROUPS)) btns(codes, g); }
+  else {
+    const q = document.createElement('input'); q.type = 'text'; q.placeholder = 'Search: enter, space, a, f5, up...'; q.style.cssText = 'width:100%;margin-bottom:6px'; q.value = dSearch;
+    body.appendChild(q);
+    q.oninput = () => { dSearch = q.value; drawDlg(); const n = $('dBody').querySelector('input'); n.focus(); n.setSelectionRange(n.value.length, n.value.length); };
+    const t = dSearch.trim().toLowerCase();
+    if (t) { const all = [...new Set(Object.values(KEY_GROUPS).flat())].filter(c => nm(c).toLowerCase().includes(t) || '0x' + h2(c) === t); btns(all, all.length ? 'Results' : 'No match'); }
+    else for (const [g, codes] of Object.entries(KEY_GROUPS)) btns(codes, g);
+  }
 }
 document.querySelectorAll('.cat').forEach(c => c.onclick = () => { dCat = c.dataset.cat; if (dCat === 'default') dVal = slotByK(dK).def; if (dCat === 'disable') dVal = 0x00; drawDlg(); });
 const closeDlg = () => { $('dlg').hidden = true; dK = null; };
