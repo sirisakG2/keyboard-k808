@@ -73,10 +73,12 @@ select,input[type=text]{font:inherit;background:#0f1418;color:var(--ink);border:
 .close{position:absolute;top:6px;right:10px;background:none;border:0;font-size:1.4rem;color:#fff}
 .mfoot{display:flex;justify-content:flex-end;gap:6px;margin-top:14px}
 details{margin-top:10px}pre{background:#0a0d10;color:#9fe3a9;padding:10px;border-radius:8px;max-height:220px;overflow:auto;white-space:pre-wrap;font-size:.78rem}
+.lgrid{display:grid;grid-template-columns:1fr 1.3fr 1fr;gap:20px}
+.crow{display:flex;align-items:center;gap:8px;margin:3px 0}.crow input[type=color]{width:42px;height:26px;border:0;background:none;padding:0}
 .lightGrid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;opacity:.55;pointer-events:none}
 .swatches span{display:inline-block;width:18px;height:18px;margin:2px;border-radius:3px}
 a{color:var(--cyan)}
-@media(max-width:640px){.pad{grid-template-columns:40px repeat(5,52px);grid-template-rows:repeat(3,56px);gap:6px}.modal{grid-template-columns:1fr}.side{grid-template-columns:repeat(4,1fr)}.preview{grid-column:1/5}.lightGrid{grid-template-columns:1fr}}
+@media(max-width:640px){.lgrid{grid-template-columns:1fr}.pad{grid-template-columns:40px repeat(5,52px);grid-template-rows:repeat(3,56px);gap:6px}.modal{grid-template-columns:1fr}.side{grid-template-columns:repeat(4,1fr)}.preview{grid-column:1/5}.lightGrid{grid-template-columns:1fr}}
 </style>
 </head><body>
 <div class="top">
@@ -113,13 +115,35 @@ a{color:var(--cyan)}
   <!-- LIGHT TAB -->
   <section id="tab-light" hidden>
     <div class="panel">
-      <h3>Light</h3>
-      <div class="banner info">Lighting is not available yet. The vendor app stores light settings in a part of the keyboard memory I haven't decoded, and writing it blind could break your settings. The controls below show what the original app offers.</div>
-      <div class="lightGrid">
-        <div><div class="mute">Mode</div><select><option>Constant</option><option>Breathing</option><option>Neon</option><option>Response</option></select>
-          <div class="mute" style="margin-top:10px">Brightness</div><input type="range"><div class="mute">Frequency</div><input type="range"></div>
-        <div><div class="mute">Single color | Cycle color</div><div class="swatches"><span style="background:#ff0"></span><span style="background:#08f"></span><span style="background:#f0f"></span><span style="background:#0f4"></span><span style="background:#f00"></span><span style="background:#0ff"></span><span style="background:#fff"></span></div></div>
-        <div><div class="mute">Symmetry</div><input type="checkbox"><div class="mute" style="margin-top:10px">Direction</div>&#8634; &#8635; &#8644; S</div>
+      <h3>Light <span class="mute" style="font-size:.8rem;font-weight:400">(experimental: decoded from the vendor app, not yet tested on your keyboard)</span></h3>
+      <div id="lNote" class="banner info">Connect the keyboard to load its light settings.</div>
+      <div id="lBox" hidden>
+        <div class="lgrid">
+          <div>
+            <div class="mute">Mode</div>
+            <select id="lMode" style="width:100%"></select>
+            <div class="mute" style="margin-top:12px">Brightness <b id="lBrightV"></b></div>
+            <input id="lBright" type="range" min="0" max="7" style="width:100%">
+            <div class="mute">Speed (frequency) <b id="lSpeedV"></b></div>
+            <input id="lSpeed" type="range" min="0" max="7" style="width:100%">
+          </div>
+          <div>
+            <div class="mute">Colors &mdash; pick <b>one color</b>, or <b>Cycle</b> through the ticked ones</div>
+            <label style="display:block;margin:6px 0"><input type="radio" name="lSel" value="0"> Cycle colors</label>
+            <div id="lColors"></div>
+          </div>
+          <div>
+            <div class="mute">Symmetry</div>
+            <label><input id="lSym" type="checkbox"> On</label>
+            <div class="mute" style="margin-top:12px">Direction</div>
+            <div id="lDir" class="grid"></div>
+          </div>
+        </div>
+        <div class="row" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px">
+          <button id="lSave" class="tbtn primary">Save light to keyboard</button>
+          <button id="lUndo" class="tbtn">Undo light changes</button>
+          <span class="mute" id="lChanged"></span>
+        </div>
       </div>
     </div>
   </section>
@@ -363,6 +387,7 @@ async function loadKeys() {
     original = {}; current = {};
     for (const s of SLOTS) { const v = (await readBlock(T2 + s.k * 8, 1))[0]; original[s.k] = v; current[s.k] = v; }
     note('ok', 'Loaded your keys from the keyboard.'); log('Loaded: ' + JSON.stringify(original));
+    try { await loadLight(); } catch (e) { log('Light read error: ' + e.message); }
   } catch (e) { note('bad', 'Could not read the keyboard: ' + e.message); log('Error: ' + e.message); }
   setBusy(false); drawPad(); drawCfg();
 }
@@ -514,6 +539,96 @@ $('ffStart').onclick = async () => {
   }
   dev = null; $('status').textContent = 'Not connected'; $('status').className = 'chip';
   setBusy(false);
+};
+
+// ---------- light (decoded from vendor function 0x40fd80; config block at 0x00e0..0x00ff) ----------
+const LBASE = 0xe0;
+const LMODES = ['Off', 'Breathing', 'Constant', 'Response', 'Neon', 'Ambilight', 'Comet Tail', 'Single Water', 'Flow Water', 'Flashing', 'Monochromatic Wave'];
+const LDIRS = ['↻ Dir 0', '↺ Dir 1', '⇄ Dir 2', 'S Dir 3'];
+let lOrig = null, lCur = null;
+function lDecode(b) {
+  const col = (rb, gb) => [b[rb] >> 4, b[gb] & 15, b[rb] & 15]; // [R, G, B] 0..15
+  return {
+    colors: [col(1, 2), col(3, 4), col(5, 6), col(7, 8), col(9, 10), col(11, 12), col(13, 14)],
+    dir: b[24] >> 6, bright: (b[24] >> 3) & 7, speed: b[24] & 7,
+    sym: b[25] >> 7, sel: (b[25] >> 4) & 7, mode: b[25] & 15, cyc: b[26] & 0x7f, modeMask: b[27],
+  };
+}
+function lEncode(st, base) {
+  const b = base.slice();
+  const put = (i, rb, gb) => { const [r, g, bl] = st.colors[i]; b[rb] = (r << 4) | bl; b[gb] = (b[gb] & 0xf0) | g; };
+  put(0, 1, 2); put(1, 3, 4); put(2, 5, 6); put(3, 7, 8); put(4, 9, 10); put(5, 11, 12); put(6, 13, 14);
+  b[24] = (st.dir << 6) | (st.bright << 3) | st.speed;
+  b[25] = (st.sym << 7) | (st.sel << 4) | st.mode;
+  b[26] = 0x80 | (st.cyc & 0x7f);
+  return b;
+}
+async function writeBlock8(addr, bytes) {
+  const lo = addr & 0xff, hi = (addr >> 8) & 0xff;
+  for (let i = 0; i < 8; i++) await send(pkt(3, i, lo, hi, bytes[i], 7));
+  await sleep(2); await send(pkt(9, 0, lo, hi, 0, 7)); await sleep(10);
+  await send(pkt(1, 0, lo, hi, 0, 0)); await sleep(10);
+}
+async function loadLight() {
+  if (!dev) return;
+  const raw = [];
+  for (let a = LBASE; a < LBASE + 32; a += 8) raw.push(...await readBlock(a, 8));
+  lOrig = raw; lCur = lDecode(raw);
+  log('Light block: ' + raw.map(h2).join(' '));
+  if (raw[28] !== 0x28 || raw[29] !== 0x01) { $('lNote').className = 'banner bad'; $('lNote').textContent = 'The light block does not look like what I expected (key-table pointer is not 0x0128), so editing is turned off to keep your keyboard safe. Copy the debug report and send it to Claude.'; $('lNote').hidden = false; $('lBox').hidden = true; return; }
+  $('lNote').hidden = true; $('lBox').hidden = false; drawLight();
+}
+const to8 = v => '#' + [0, 1, 2].map(i => h2(v[i] * 17)).join('');
+const from8 = hex => [1, 3, 5].map(i => Math.round(parseInt(hex.substr(i, 2), 16) / 17));
+function lDirty() { return lOrig && lEncode(lCur, lOrig).some((v, i) => v !== lOrig[i]); }
+function drawLight() {
+  const st = lCur;
+  $('lMode').innerHTML = LMODES.map((n, i) => `<option value="${i}">${i}. ${n}</option>`).join('') + (st.mode > 10 ? `<option value="${st.mode}">${st.mode}. (unknown)</option>` : '');
+  $('lMode').value = st.mode;
+  $('lBright').value = st.bright; $('lBrightV').textContent = st.bright;
+  $('lSpeed').value = st.speed; $('lSpeedV').textContent = st.speed;
+  $('lSym').checked = !!st.sym;
+  document.querySelector('input[name=lSel][value="0"]').checked = st.sel === 0;
+  const box = $('lColors'); box.innerHTML = '';
+  st.colors.forEach((c, i) => {
+    const row = document.createElement('div'); row.className = 'crow';
+    row.innerHTML = `<input type="radio" name="lSel" value="${i + 1}" title="Use only this color"><input type="color" value="${to8(c)}"><label class="mute"><input type="checkbox" ${st.cyc >> i & 1 ? 'checked' : ''}> in cycle</label><span class="mute">#${i + 1}</span>`;
+    row.querySelector('input[type=radio]').checked = st.sel === i + 1;
+    row.querySelector('input[type=radio]').onchange = () => { st.sel = i + 1; drawLight(); };
+    row.querySelector('input[type=color]').onchange = e => { st.colors[i] = from8(e.target.value); drawLight(); };
+    row.querySelector('input[type=checkbox]').onchange = e => { st.cyc = e.target.checked ? st.cyc | (1 << i) : st.cyc & ~(1 << i); drawLight(); };
+    box.appendChild(row);
+  });
+  const dir = $('lDir'); dir.innerHTML = '';
+  LDIRS.forEach((n, i) => { const b = document.createElement('button'); b.textContent = n; if (st.dir === i) b.className = 'on'; b.onclick = () => { st.dir = i; drawLight(); }; dir.appendChild(b); });
+  $('lChanged').textContent = lDirty() ? 'Unsaved light changes.' : '';
+  $('lSave').disabled = !lDirty() || !dev || busy; $('lUndo').disabled = !lDirty();
+}
+document.querySelector('input[name=lSel][value="0"]').onchange = () => { lCur.sel = 0; drawLight(); };
+$('lMode').onchange = e => { lCur.mode = +e.target.value; drawLight(); };
+$('lBright').oninput = e => { lCur.bright = +e.target.value; drawLight(); };
+$('lSpeed').oninput = e => { lCur.speed = +e.target.value; drawLight(); };
+$('lSym').onchange = e => { lCur.sym = e.target.checked ? 1 : 0; drawLight(); };
+$('lUndo').onclick = () => { lCur = lDecode(lOrig); drawLight(); };
+$('lSave').onclick = async () => {
+  const want = lEncode(lCur, lOrig);
+  setBusy(true);
+  try {
+    if ($('backupChk').checked && !backedUp) { await downloadBackup('k808-backup-' + new Date().toISOString().replace(/[:.]/g, '-') + '.json'); backedUp = true; }
+    try { localStorage.setItem('k808lightBefore', JSON.stringify(lOrig)); } catch (e) {}
+    await beginWrite();
+    for (let blk = 0; blk < 4; blk++) {
+      const a = LBASE + blk * 8, chunk = want.slice(blk * 8, blk * 8 + 8);
+      if (chunk.some((v, i) => v !== lOrig[blk * 8 + i])) { await writeBlock8(a, chunk); log(`Light: wrote block 0x${h2(a)}: ${chunk.map(h2).join(' ')}`); }
+    }
+    await finishWrite(); await sleep(500);
+    const old = lOrig; await loadLight();
+    const ok = lOrig.every((v, i) => v === want[i]);
+    note(ok ? 'ok' : 'bad', ok ? 'Light settings saved.' : 'Light settings did not verify. Previous values are kept in this browser; tell Claude.');
+    if (!ok) log('Light verify failed. Wanted ' + want.map(h2).join(' ') + ' got ' + lOrig.map(h2).join(' ') + ' was ' + old.map(h2).join(' '));
+  } catch (e) { note('bad', 'Saving light failed: ' + e.message); log('Error: ' + e.message); }
+  setBusy(false); drawLight();
+  if ($('autoDisc').checked && dev) { await disconnect(true); $('note').textContent += ' Disconnected from the page - check the lights (if keys stop typing, unplug and replug once).'; }
 };
 
 // ---------- tabs ----------

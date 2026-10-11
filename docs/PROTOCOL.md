@@ -65,3 +65,15 @@ Our page never sent the finish pair, and the keyboard stopped typing after write
 
 ## Observed on real hardware: the keyboard drops off USB during a write
 Real-hardware error after Apply: "Cannot read properties of null (reading 'sendFeatureReport')" -> the browser fired a `disconnect` event in the middle of the write session, i.e. the keyboard re-enumerates (restarts) when the write is committed. The page now keeps the device reference, waits up to 10 s for it to reappear (`getDevices()`), reopens it, then verifies and sends the finish packets.
+
+## Light settings (decoded from vendor function 0x40fd80, matches the real dump)
+Config base = 0x00e0 (vendor reads it from the device; our dump at 0x00d0 holds `e1 1e e0 00 ...`).
+- `0x00e0` block (8 bytes): b0 = flags (keep). Colors are 4-bit per channel (0-15), packed as `R<<4 | B` and `G` in the low nibble of the next byte:
+  color1 = e1 (R|B), e2 low (G); color2 = e3, e4; color3 = e5, e6; color4 = e7, e8. High nibbles of e2/e4/e6 are other settings (keep).
+- `0x00e8` block: color4 G = e8 low; color5 = e9, ea; color6 = eb, ec; color7 = ed, ee; ef = flags (keep).
+  Default colors decode to yellow, cyan, magenta, red, blue, green, black - exactly the vendor defaults.
+- `0x00f0` block: per-mode extras (all 0 on this keyboard, keep).
+- `0x00f8` block: `[dir<<6 | bright<<3 | speed] [sym<<7 | colorSel<<4 | mode] [0x80 | cycleColorMask] [modeEnableMask] [0x28 0x01 = key table 0x0128] [0xd8 0x01 = table 0x01d8]`.
+  Real value `43 05 ff ff 28 01 d8 01` = direction 1, brightness 0, speed 3, mode 5 (Ambilight), cycle all 7 colors.
+- Modes (vendor names 30-40): 0 Off, 1 Breathing, 2 Constant, 3 Response, 4 Neon, 5 Ambilight, 6 Comet Tail, 7 Single Water, 8 Flow Water, 9 Flashing, 10 Monochromatic Wave.
+- Vendor writes these as 8-byte blocks: 8 x cmd3 (idx 0-7, last byte 7), cmd9 (last 7), cmd1.
