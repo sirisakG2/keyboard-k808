@@ -38,6 +38,16 @@ pre{background:#111;color:#0f0;padding:1rem;min-height:8rem;overflow:auto;white-
 <button id="backup">Download backup (full dump 0x0000-0x03ff)</button>
 </fieldset>
 
+<fieldset id="editBox" disabled>
+<legend>5. Edit one key (WRITES to the keyboard) &mdash; table @0x0128</legend>
+<p>Saves the original value first, writes one byte, reads it back to verify. Test with a key you can undo. Then press <b>Restore</b>.</p>
+<label>Key # (0-11) <input id="ekey" type="number" min="0" max="11" value="11"></label>
+<label>New key <select id="enew" style="width:auto"></select></label>
+<br><button id="ewrite">Write key</button>
+<button id="erestore">Restore original</button>
+<p>Or restore everything in this table from your backup file: <input type="file" id="bfile" accept=".json"></p>
+</fieldset>
+
 <pre id="log"></pre>
 <script>
 const logEl = document.getElementById('log');
@@ -97,6 +107,7 @@ document.getElementById('connect').onclick = async () => {
     document.getElementById('readBox').disabled = false;
     document.getElementById('dumpBox').disabled = false;
     document.getElementById('layoutBox').disabled = false;
+    document.getElementById('editBox').disabled = false;
   } catch (e) { log('Error: ' + e.message); }
 };
 
@@ -166,6 +177,68 @@ document.getElementById('backup').onclick = async () => {
     const blob = new Blob([JSON.stringify({ vid: 0x30fa, pid: 0x2350, start: 0, hex: bytes.map(h2).join('') })], { type: 'application/json' });
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'k808-backup.json'; a.click();
     log('Backup downloaded: k808-backup.json. Keep this file.');
+  } catch (e) { log('Error: ' + e.message); }
+};
+</script>
+<script>
+const T2 = 0x128;
+const CHOICES = [];
+for (let c = 0x04; c <= 0x27; c++) CHOICES.push(c);                // letters, digits
+CHOICES.push(0x28, 0x29, 0x2a, 0x2b, 0x2c, 0x35, 0x4f, 0x50, 0x51, 0x52);
+for (let c = 0x3a; c <= 0x45; c++) CHOICES.push(c);                // F1-F12
+for (let c = 0x59; c <= 0x63; c++) CHOICES.push(c);                // keypad
+const sel = document.getElementById('enew');
+for (const c of CHOICES) {
+  const o = document.createElement('option'); o.value = c;
+  o.textContent = (c >= 0x3a && c <= 0x45 ? 'F' + (c - 0x39) : nm(c)) + '  (0x' + h2(c) + ')';
+  sel.appendChild(o);
+}
+let originals = JSON.parse(sessionStorage.getItem('k808orig') || '{}');
+
+async function writeByte(addr, val) {
+  const lo = addr & 0xff, hi = (addr >> 8) & 0xff;
+  await send(pkt(3, 0, lo, hi, val, 0));   // stage the byte
+  await sleep(2);
+  await send(pkt(9, 0, lo, hi, 0, 0));     // commit to addr
+  await sleep(10);
+  await send(pkt(1, 0, lo, hi, 0, 0));     // end
+  await sleep(10);
+  return (await readBlock(addr, 1, 0))[0];
+}
+document.getElementById('ewrite').onclick = async () => {
+  const k = parseInt(document.getElementById('ekey').value, 10);
+  if (!(k >= 0 && k <= 11)) return log('Key must be 0-11.');
+  const addr = T2 + k * 8, val = parseInt(sel.value, 10);
+  try {
+    const before = (await readBlock(addr, 1, 0))[0];
+    if (!(addr in originals)) { originals[addr] = before; sessionStorage.setItem('k808orig', JSON.stringify(originals)); }
+    log(`Key ${k} @${hex(addr)}: was ${nm(before)} (0x${h2(before)}), writing ${nm(val)} (0x${h2(val)})...`);
+    const after = await writeByte(addr, val);
+    log(after === val ? `OK: read back 0x${h2(after)}. Press the key to test it.` : `MISMATCH: read back 0x${h2(after)}. Press Restore.`);
+  } catch (e) { log('Error: ' + e.message); }
+};
+document.getElementById('erestore').onclick = async () => {
+  try {
+    const keys = Object.keys(originals);
+    if (!keys.length) return log('Nothing to restore from this session. Use the backup file.');
+    for (const a of keys) {
+      const after = await writeByte(parseInt(a, 10), originals[a]);
+      log(`Restored @${hex(parseInt(a, 10))} to 0x${h2(originals[a])}: read back 0x${h2(after)}`);
+    }
+    originals = {}; sessionStorage.setItem('k808orig', '{}');
+  } catch (e) { log('Error: ' + e.message); }
+};
+document.getElementById('bfile').onchange = async ev => {
+  try {
+    const f = ev.target.files[0]; if (!f) return;
+    const j = JSON.parse(await f.text());
+    const bytes = j.hex.match(/../g).map(x => parseInt(x, 16));
+    for (let k = 0; k < KEYS; k++) {
+      const addr = T2 + k * 8, want = bytes[addr];
+      const now = (await readBlock(addr, 1, 0))[0];
+      if (now !== want) { const after = await writeByte(addr, want); log(`Key ${k}: 0x${h2(now)} -> 0x${h2(want)} (read back 0x${h2(after)})`); }
+    }
+    log('Restore from backup file done.');
   } catch (e) { log('Error: ' + e.message); }
 };
 </script></body></html>
