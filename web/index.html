@@ -48,6 +48,16 @@ pre{background:#111;color:#0f0;padding:1rem;min-height:8rem;overflow:auto;white-
 <p>Or restore everything in this table from your backup file: <input type="file" id="bfile" accept=".json"></p>
 </fieldset>
 
+<fieldset id="calBox">
+<legend>7. Find the true key map (calibrate)</legend>
+<p><b>A.</b> (keyboard connected) Write a test pattern: each key gets its own letter. A backup is downloaded first.<br>
+<b>B.</b> Close tab, replug, reopen this page (no need to connect), then <b>Start calibration</b> and press each key when asked. The editor then uses the real map.</p>
+<button id="cpat" disabled>A. Write test pattern (letters a-l)</button>
+<button id="cstart">B. Start calibration</button>
+<button id="creset">Forget saved map</button>
+<div id="cmsg" style="margin:.5rem 0;font-weight:bold"></div>
+</fieldset>
+
 <fieldset id="gridBox" disabled>
 <legend>6. Key editor (WRITES to the keyboard) &mdash; table @0x0128</legend>
 <p>1) Load, 2) change the drop-downs, 3) Apply. A backup file is downloaded before the first write. Afterwards close this tab and replug the keyboard.</p>
@@ -117,6 +127,7 @@ document.getElementById('connect').onclick = async () => {
     document.getElementById('layoutBox').disabled = false;
     document.getElementById('editBox').disabled = false;
     document.getElementById('gridBox').disabled = false;
+    document.getElementById('cpat').disabled = false;
   } catch (e) { log('Error: ' + e.message); }
 };
 
@@ -258,6 +269,10 @@ const PHYS = [
   [9, '6', 1, 2, 1], [8, '7', 2, 2, 1], [7, '8', 3, 2, 1], [6, '9', 4, 2, 1], [5, 'ENTER', 5, 2, 2],
   [10, '0', 1, 3, 2], [11, '.', 3, 3, 1],
 ];
+try {
+  const saved = JSON.parse(localStorage.getItem('k808map') || 'null'); // label -> key#
+  if (saved) for (const row of PHYS) if (saved[row[1]] !== undefined) row[0] = saved[row[1]];
+} catch (e) {}
 const gridEl = document.getElementById('grid');
 let loaded = {}, selects = {}, backedUp = false;
 
@@ -307,4 +322,41 @@ document.getElementById('gapply').onclick = async () => {
     log('Finished. Close this tab, unplug the keyboard for 5 seconds, plug it back in.');
   } catch (e) { log('Error: ' + e.message); }
 };
+</script>
+<script>
+const ORDER = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'ENTER', '0', '.'];
+const cmsg = document.getElementById('cmsg');
+document.getElementById('cpat').onclick = async () => {
+  try {
+    const bytes = [];
+    for (let a = 0; a < 0x400; a += 8) bytes.push(...await readBlock(a, 8, 0));
+    const blob = new Blob([JSON.stringify({ vid: 0x30fa, pid: 0x2350, start: 0, hex: bytes.map(h2).join('') })], { type: 'application/json' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'k808-backup-before-calibration.json'; a.click();
+    log('Backup downloaded: k808-backup-before-calibration.json');
+    for (let k = 0; k < 12; k++) {
+      const want = 0x04 + k;
+      const got = await writeByte(T2 + k * 8, want);
+      log(`key ${k} -> '${String.fromCharCode(97 + k)}' ${got === want ? 'OK' : 'MISMATCH 0x' + h2(got)}`);
+    }
+    log('Pattern written. Close this tab, replug the keyboard, reopen the page, press "B. Start calibration".');
+  } catch (e) { log('Error: ' + e.message); }
+};
+document.getElementById('cstart').onclick = () => {
+  const found = {}; let n = 0;
+  const ask = () => { cmsg.textContent = n < ORDER.length ? `Press the physical key: ${ORDER[n]}   (${n + 1}/12)` : ''; };
+  const onKey = ev => {
+    const m = /^Key([A-L])$/.exec(ev.code);
+    if (!m) { cmsg.textContent = `Got ${ev.code}; expected a letter a-l. Press the key: ${ORDER[n]}`; return; }
+    ev.preventDefault();
+    found[ORDER[n]] = m[1].charCodeAt(0) - 65; n++;
+    if (n === ORDER.length) {
+      window.removeEventListener('keydown', onKey, true);
+      localStorage.setItem('k808map', JSON.stringify(found));
+      cmsg.textContent = 'Saved! Reload the page; the editor will use the real map.';
+      log('Calibrated map (label -> key#): ' + JSON.stringify(found));
+    } else ask();
+  };
+  window.addEventListener('keydown', onKey, true); ask();
+};
+document.getElementById('creset').onclick = () => { localStorage.removeItem('k808map'); cmsg.textContent = 'Map forgotten. Reload the page.'; };
 </script></body></html>
