@@ -83,6 +83,7 @@ details{margin-top:6px}pre{background:#0f1115;color:#9fe3a9;padding:12px;border-
   <ol class="mute" style="margin:4px 0 8px;padding-left:20px"><li>Connect the keyboard (keys appear above).</li><li>Click <b>Start test</b>.</li><li>A small keyboard picture appears below. Press the <b style="color:#00a5bd">glowing</b> key on your real keyboard. 12 times.</li></ol>
   <div class="row" style="margin-top:0"><button id="lcStart">Start test</button><button id="lcUse" disabled>Fix the picture to match my keyboard</button></div>
   <p id="lcMsg" style="font-weight:600;margin:8px 0 0"></p>
+  <p class="mute" style="margin:4px 0">Last key this page heard: <b id="lcHeard">none yet</b> <span id="lcHint" style="color:var(--bad-ink)"></span></p>
   <div id="lcPad" class="pad" style="grid-template-rows:repeat(3,54px);max-width:420px;margin:8px 0" hidden></div>
   <div id="lcRes"></div>
   <details><summary>Technical details</summary><pre id="lcOut" style="max-height:220px"></pre></details>
@@ -464,7 +465,15 @@ for (let i = 0; i < 9; i++) { CODEMAP[0x1e + i] = 'Digit' + (i + 1); CODEMAP[0x5
 CODEMAP[0x27] = 'Digit0';
 for (let i = 0; i < 12; i++) CODEMAP[0x3a + i] = 'F' + (i + 1);
 const USAGE_OF = {}; for (const [u, c] of Object.entries(CODEMAP)) USAGE_OF[c] = parseInt(u, 10);
-let lcFound = null, lcTarget = null;
+let lcFound = null, lcTarget = null, lcTimer = null;
+window.addEventListener('keydown', ev => {
+  $('lcHeard').textContent = ev.code + (ev.key && ev.key.length === 1 ? ' ("' + ev.key + '")' : '');
+  $('lcHint').textContent = ''; clearTimeout(lcTimer);
+}, true);
+function lcWatch() {
+  clearTimeout(lcTimer);
+  lcTimer = setTimeout(() => { $('lcHint').textContent = '  No key heard yet. Click an empty part of this page once, then press the key. Does the keyboard type in Notepad/TextEdit? If not, unplug and replug it.'; }, 6000);
+}
 function drawMini() {
   const m = $('lcPad'); m.innerHTML = '';
   if (lcTarget === null) { m.hidden = true; return; }
@@ -486,7 +495,7 @@ $('lcStart').onclick = async () => {
   try { for (let k = 0; k < 12; k++) t1[k] = (await readBlock(0x20 + k * 8, 1))[0]; } catch (e) { out.textContent += 'Could not read table 0x0020: ' + e.message + '\n'; }
   setBusy(false);
   const found = {}, rows = [], results = []; let n = 0, hit1 = 0, hit2 = 0;
-  const ask = () => { lcTarget = ORDER[n]; drawPad(); drawMini(); msg.textContent = `Step ${n + 1} of ${ORDER.length}: press the key '${ORDER[n]}' on your keyboard (it glows below).`; window.focus(); };
+  const ask = () => { lcTarget = ORDER[n]; drawPad(); drawMini(); msg.textContent = `Step ${n + 1} of ${ORDER.length}: PRESS the key '${ORDER[n]}' on your real keyboard (clicking with the mouse does nothing). It glows below.`; window.focus(); lcWatch(); };
   const onKey = ev => {
     if (ev.repeat) return;
     ev.preventDefault();
