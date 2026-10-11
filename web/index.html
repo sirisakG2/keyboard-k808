@@ -34,7 +34,7 @@ details{margin-top:6px}pre{background:#0f1115;color:#9fe3a9;padding:12px;border-
 </style></head><body><div class="wrap">
 <header>
   <div><h1>K808 Configurator</h1><span id="status" class="chip">Not connected</span></div>
-  <div><button id="connect" class="primary">Connect keyboard</button> <button id="disconnect" disabled>Disconnect</button></div>
+  <div><button id="connect" class="primary">Connect keyboard</button> <button id="disconnect">Disconnect</button></div>
 </header>
 
 <div id="support" class="banner bad" hidden>This browser can't talk to USB keyboards. Use Chrome or Edge on a computer.</div>
@@ -51,7 +51,8 @@ details{margin-top:6px}pre{background:#0f1115;color:#9fe3a9;padding:12px;border-
       <button id="defaults" disabled>Vendor defaults</button>
       <button id="apply" class="primary" disabled>Apply to keyboard</button>
     </div>
-    <label class="mute" style="display:block;margin-top:8px"><input id="autoDisc" type="checkbox" checked> Disconnect automatically after Apply</label>
+    <label class="mute" style="display:block;margin-top:8px"><input id="backupChk" type="checkbox" checked> Download a backup file (only once per page visit)</label>
+    <label class="mute" style="display:block"><input id="autoDisc" type="checkbox" checked> Disconnect automatically after Apply</label>
     <p class="mute" style="margin-bottom:0">A backup file is saved before writing. If keys stop typing after Apply, press Disconnect; if they still don't work, unplug and replug.</p>
   </section>
 
@@ -158,7 +159,7 @@ async function writeByte(addr, val) {
 }
 
 // ---------- state ----------
-let current = {}, original = {}, sel = null;   // key# -> code
+let current = {}, original = {}, sel = null, backedUp = false;   // key# -> code
 let filter = 'Letters';
 
 function note(kind, text) { const n = $('note'); n.hidden = !text; n.className = 'banner ' + kind; n.textContent = text || ''; }
@@ -251,16 +252,20 @@ async function connect() {
     featLen = featureDataLength(col);
     if (featLen < 7) { await disconnect(true); return note('bad', 'Unexpected report size ' + featLen); }
     $('status').textContent = 'Connected: ' + (dev.productName || 'keyboard'); $('status').className = 'chip on';
-    $('connect').disabled = true; $('disconnect').disabled = false;
+    $('connect').disabled = true;
     log('Connected, feature report length ' + featLen);
     refreshButtons(); await loadKeys();
   } catch (e) { note('bad', 'Connect failed: ' + e.message); log('Error: ' + e.message); }
 }
 async function disconnect(silent) {
-  try { if (dev && dev.opened) await dev.close(); } catch (e) { log('Close error: ' + e.message); }
+  try {
+    const all = (await navigator.hid.getDevices()).filter(d => d.vendorId === 0x30fa && d.productId === 0x2350);
+    if (dev && !all.includes(dev)) all.push(dev);
+    for (const d of all) if (d.opened) await d.close();
+  } catch (e) { log('Close error: ' + e.message); }
   dev = null;
   $('status').textContent = 'Not connected'; $('status').className = 'chip';
-  $('connect').disabled = false; $('disconnect').disabled = true;
+  $('connect').disabled = false;
   if (!silent) note('ok', 'Disconnected. Try typing on the keyboard. To change keys again, press Connect (no popup needed).');
   refreshButtons();
 }
@@ -281,7 +286,12 @@ async function downloadBackup(name) {
 async function doApply() {
   setBusy(true);
   try {
-    await downloadBackup('k808-backup-' + new Date().toISOString().replace(/[:.]/g, '-') + '.json');
+    // safety copy of the keys as they are now: always kept as a profile, no file needed
+    const safe = { name: '(before last apply)', keys: {} };
+    for (const r of PHYS) safe.keys[r[1]] = original[r[0]];
+    const si = profiles.findIndex(x => x.name === safe.name); if (si >= 0) profiles[si] = safe; else profiles.push(safe);
+    saveProfiles(); drawProfiles();
+    if ($('backupChk').checked && !backedUp) { await downloadBackup('k808-backup-' + new Date().toISOString().replace(/[:.]/g, '-') + '.json'); backedUp = true; }
     let bad = 0;
     for (const r of PHYS) {
       const k = r[0];
