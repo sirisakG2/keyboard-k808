@@ -48,6 +48,14 @@ pre{background:#111;color:#0f0;padding:1rem;min-height:8rem;overflow:auto;white-
 <p>Or restore everything in this table from your backup file: <input type="file" id="bfile" accept=".json"></p>
 </fieldset>
 
+<fieldset id="gridBox" disabled>
+<legend>6. Key editor (WRITES to the keyboard) &mdash; table @0x0128</legend>
+<p>1) Load, 2) change the drop-downs, 3) Apply. A backup file is downloaded before the first write. Afterwards close this tab and replug the keyboard.</p>
+<button id="gload">Load keys from keyboard</button>
+<div id="grid" style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin:.6rem 0"></div>
+<button id="gapply" disabled>Apply changes</button>
+</fieldset>
+
 <pre id="log"></pre>
 <script>
 const logEl = document.getElementById('log');
@@ -108,6 +116,7 @@ document.getElementById('connect').onclick = async () => {
     document.getElementById('dumpBox').disabled = false;
     document.getElementById('layoutBox').disabled = false;
     document.getElementById('editBox').disabled = false;
+    document.getElementById('gridBox').disabled = false;
   } catch (e) { log('Error: ' + e.message); }
 };
 
@@ -239,6 +248,63 @@ document.getElementById('bfile').onchange = async ev => {
       if (now !== want) { const after = await writeByte(addr, want); log(`Key ${k}: 0x${h2(now)} -> 0x${h2(want)} (read back 0x${h2(after)})`); }
     }
     log('Restore from backup file done.');
+  } catch (e) { log('Error: ' + e.message); }
+};
+</script>
+<script>
+// physical position -> key#, label, grid cell
+const PHYS = [
+  [0, '1', 1, 1, 1], [1, '2', 2, 1, 1], [2, '3', 3, 1, 1], [3, '4', 4, 1, 1], [4, '5', 5, 1, 1],
+  [9, '6', 1, 2, 1], [8, '7', 2, 2, 1], [7, '8', 3, 2, 1], [6, '9', 4, 2, 1], [5, 'ENTER', 5, 2, 2],
+  [10, '0', 1, 3, 2], [11, '.', 3, 3, 1],
+];
+const gridEl = document.getElementById('grid');
+let loaded = {}, selects = {}, backedUp = false;
+
+function keySelect(cur) {
+  const sl = document.createElement('select'); sl.style.cssText = 'width:100%';
+  const vals = CHOICES.includes(cur) ? CHOICES : [cur, ...CHOICES];
+  for (const c of vals) {
+    const o = document.createElement('option'); o.value = c;
+    o.textContent = (c >= 0x3a && c <= 0x45 ? 'F' + (c - 0x39) : nm(c)) + ' (0x' + h2(c) + ')';
+    sl.appendChild(o);
+  }
+  sl.value = cur;
+  return sl;
+}
+document.getElementById('gload').onclick = async () => {
+  try {
+    gridEl.innerHTML = ''; loaded = {}; selects = {};
+    for (const [k, label, col, row, span] of PHYS) {
+      const v = (await readBlock(T2 + k * 8, 1, 0))[0];
+      loaded[k] = v;
+      const cell = document.createElement('div');
+      cell.style.cssText = `grid-column:${col}/span ${span};grid-row:${row}/${row + (label === 'ENTER' ? 2 : 1)}`;
+      cell.innerHTML = `<b>${label}</b> <small>(key ${k})</small><br>`;
+      const sl = keySelect(v); selects[k] = sl; cell.appendChild(sl); gridEl.appendChild(cell);
+    }
+    document.getElementById('gapply').disabled = false;
+    log('Loaded 12 keys from the keyboard.');
+  } catch (e) { log('Error: ' + e.message); }
+};
+document.getElementById('gapply').onclick = async () => {
+  try {
+    const changes = PHYS.filter(([k]) => parseInt(selects[k].value, 10) !== loaded[k]);
+    if (!changes.length) return log('Nothing changed.');
+    if (!backedUp) {
+      const bytes = [];
+      for (let a = 0; a < 0x400; a += 8) bytes.push(...await readBlock(a, 8, 0));
+      const blob = new Blob([JSON.stringify({ vid: 0x30fa, pid: 0x2350, start: 0, hex: bytes.map(h2).join('') })], { type: 'application/json' });
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'k808-backup-before-edit.json'; a.click();
+      backedUp = true; log('Backup downloaded: k808-backup-before-edit.json');
+    }
+    for (const [k, label] of changes) {
+      const want = parseInt(selects[k].value, 10);
+      const got = await writeByte(T2 + k * 8, want);
+      log(`Key ${label}: 0x${h2(loaded[k])} -> 0x${h2(want)}  ${got === want ? 'OK' : 'MISMATCH (read back 0x' + h2(got) + ')'}`);
+      if (got === want) loaded[k] = want;
+    }
+    log('Finished. Close this tab, unplug the keyboard for 5 seconds, plug it back in.');
   } catch (e) { log('Error: ' + e.message); }
 };
 </script></body></html>
