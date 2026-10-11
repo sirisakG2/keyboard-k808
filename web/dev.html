@@ -7,7 +7,8 @@ button{font-size:1rem;padding:.6rem 1rem;margin:.2rem 0}
 input,select{font-size:1rem;padding:.4rem;width:6rem}
 fieldset{margin:1rem 0;border:1px solid #888;border-radius:6px}
 pre{background:#111;color:#0f0;padding:1rem;min-height:8rem;overflow:auto;white-space:pre-wrap}
-</style></head><body>
+</style><script src="version.js" onerror="window.APP_VERSION=null"></script>
+</head><body>
 <h1>K808 developer tools</h1><p><a href="./">Back to the app</a></p>
 <p>Needs Chrome or Edge on desktop. Close the official keyboard app first.</p>
 <button id="connect">1. Connect keyboard</button>
@@ -391,4 +392,6 @@ document.getElementById('l3').onclick = async () => {
   } catch (e) { log('Error: ' + e.message); }
 };
 document.getElementById('l5').onclick = async () => { try { await dev.close(); log('Closed. Test keys now.'); } catch (e) { log('Error: ' + e.message); } };
+</script><script>
+(() => { const v = window.APP_VERSION; if (!v) return; document.title += " \u00b7 " + v.commit; document.querySelectorAll("h1").forEach(h => { const s = document.createElement("span"); s.className = "mute"; s.style.cssText = "font-size:.8rem;font-weight:400;margin-left:8px;color:#667085"; s.title = v.message + " (" + v.built + ")"; s.textContent = v.commit; h.appendChild(s); }); })();
 </script></body></html>

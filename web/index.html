@@ -31,7 +31,8 @@ input[type=text],select{font:inherit;padding:.4rem .6rem;border-radius:8px;borde
 details{margin-top:6px}pre{background:#0f1115;color:#9fe3a9;padding:12px;border-radius:8px;max-height:240px;overflow:auto;white-space:pre-wrap;font-size:.8rem}
 .row{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
 .mute{color:var(--mute);font-size:.9rem}
-</style></head><body><div class="wrap">
+</style><script src="version.js" onerror="window.APP_VERSION=null"></script>
+</head><body><div class="wrap">
 <header>
   <div><h1>K808 Configurator</h1><span id="status" class="chip">Not connected</span></div>
   <div><button id="connect" class="primary">Connect keyboard</button> <button id="disconnect">Disconnect</button></div>
@@ -422,4 +423,6 @@ $('pimport').onchange = async ev => {
 if (!('hid' in navigator)) { $('support').hidden = false; $('connect').disabled = true; }
 if ('hid' in navigator) navigator.hid.addEventListener('disconnect', e => { if (dev && e.device === dev) disconnect(true); });
 drawPad(); drawPicker(); drawProfiles(); refreshButtons();
+</script><script>
+(() => { const v = window.APP_VERSION; if (!v) return; document.title += " \u00b7 " + v.commit; document.querySelectorAll("h1").forEach(h => { const s = document.createElement("span"); s.className = "mute"; s.style.cssText = "font-size:.8rem;font-weight:400;margin-left:8px;color:#667085"; s.title = v.message + " (" + v.built + ")"; s.textContent = v.commit; h.appendChild(s); }); })();
 </script></body></html>
