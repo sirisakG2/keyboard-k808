@@ -77,3 +77,8 @@ Config base = 0x00e0 (vendor reads it from the device; our dump at 0x00d0 holds 
   Real value `43 05 ff ff 28 01 d8 01` = direction 1, brightness 0, speed 3, mode 5 (Ambilight), cycle all 7 colors.
 - Modes (vendor names 30-40): 0 Off, 1 Breathing, 2 Constant, 3 Response, 4 Neon, 5 Ambilight, 6 Comet Tail, 7 Single Water, 8 Flow Water, 9 Flashing, 10 Monochromatic Wave.
 - Vendor writes these as 8-byte blocks: 8 x cmd3 (idx 0-7, last byte 7), cmd9 (last 7), cmd1.
+
+## Persistence problem (real hardware, 2026-10-11)
+- First real write (key 11 -> 0x09) used only cmd3 / cmd9 / cmd1 and **survived a replug**.
+- After adding the vendor begin (07 09 41 00) + finish (0x11, 0) packets, saves read back correctly but were **gone after a replug**.
+- The page now defaults to the simple method; the vendor-style method is an option ("Save method" in More tools). After each save the page remembers what it wrote and checks on the next Connect whether it survived.
