@@ -7,7 +7,8 @@ Same protocol as the web page (see docs/PROTOCOL.md). Runs on your own PC.
   python tools/k808.py dump                 # hex dump 0x0000-0x03ff
   python tools/k808.py backup my.json       # save full dump
   python tools/k808.py keys                 # show key table @0x0128
-  python tools/k808.py set 11 0x09          # key# 11 -> HID usage 0x09 ('f'), auto-backup first
+  python tools/k808.py set 11 0x09          # key# 11 -> HID usage 0x09 ('f'); quick key-table backup first
+  python tools/k808.py set 11 0x09 --full-backup   # same, but full 1 KB backup first (slow)
   python tools/k808.py restore my.json      # restore key table from a backup
 After any write: unplug the keyboard for 5 seconds and plug it back in.
 Not tested on hardware by its author: try read-only commands first.
@@ -93,16 +94,27 @@ def cmd_backup(h, path):
     print("saved", path)
 
 
+def cmd_quick_backup(h, path):
+    """Back up only the two key tables (fast). Same file format; other bytes are 0xff and marked partial."""
+    data = [0xFF] * 0x400
+    for base in (0x20, TABLE):
+        for k in range(14):
+            data[base + k * 8] = read_block(h, base + k * 8, 1)[0]
+    with open(path, "w") as f:
+        json.dump({"vid": VID, "pid": PID, "start": 0, "partial": "key tables only", "hex": bytes(data).hex()}, f)
+    print("saved", path, "(key tables only; use `backup` for a full dump)")
+
+
 def cmd_keys(h):
     for k in range(NKEYS):
         print(f"key {k:2d}: 0x{read_block(h, TABLE + k * 8, 1)[0]:02x}")
 
 
-def cmd_set(h, key, code):
+def cmd_set(h, key, code, full=False):
     if not 0 <= key < NKEYS:
         sys.exit("key must be 0-11")
     stamp = time.strftime("%Y%m%d-%H%M%S")
-    cmd_backup(h, f"k808-backup-{stamp}.json")
+    (cmd_backup if full else cmd_quick_backup)(h, f"k808-backup-{stamp}.json")
     before = read_block(h, TABLE + key * 8, 1)[0]
     after = write_byte(h, TABLE + key * 8, code)
     print(f"key {key}: 0x{before:02x} -> 0x{code:02x}, read back 0x{after:02x}", "OK" if after == code else "MISMATCH")
@@ -129,7 +141,7 @@ def main(argv):
     elif c == "dump": cmd_dump(h)
     elif c == "backup": cmd_backup(h, argv[2])
     elif c == "keys": cmd_keys(h)
-    elif c == "set": cmd_set(h, int(argv[2], 0), int(argv[3], 0))
+    elif c == "set": cmd_set(h, int(argv[2], 0), int(argv[3], 0), "--full-backup" in argv)
     elif c == "restore": cmd_restore(h, argv[2])
     else: sys.exit(__doc__)
 
