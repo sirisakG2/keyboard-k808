@@ -63,6 +63,13 @@ details{margin-top:6px}pre{background:#0f1115;color:#9fe3a9;padding:12px;border-
   </section>
 </div>
 
+<section class="card">
+  <h2 style="margin:0 0 6px;font-size:1.05rem">Profiles <span class="mute">(saved in this browser; export a file to keep or move them)</span></h2>
+  <div class="row" style="margin-top:0"><input id="pname" type="text" placeholder="Profile name, e.g. Gaming" style="flex:1;min-width:160px"><button id="psave" disabled>Save current keys as profile</button></div>
+  <div id="plist" style="margin-top:10px"></div>
+  <div class="row"><button id="pexport">Export profiles</button><label class="mute">Import profiles <input id="pimport" type="file" accept=".json"></label></div>
+</section>
+
 <section id="calBox" class="card" hidden>
   <h2 style="margin:0 0 6px;font-size:1.05rem">Check the key order (calibrate)</h2>
   <p>This gives every key its own letter (a to l), then asks you to press each physical key. Step 1 needs the keyboard connected.</p>
@@ -162,6 +169,7 @@ function refreshButtons() {
   $('apply').disabled = !on || !dirty(); $('revert').disabled = busy || !dirty();
   $('defaults').disabled = !dev || busy || !Object.keys(original).length;
   const canPick = sel !== null && Object.keys(original).length > 0;
+  $('psave').disabled = !Object.keys(original).length;
   $('search').disabled = !canPick; $('custom').disabled = !canPick; $('customSet').disabled = !canPick;
 }
 function drawPad() {
@@ -258,7 +266,7 @@ async function downloadBackup(name) {
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click();
   log('Backup downloaded: ' + name);
 }
-$('apply').onclick = async () => {
+async function doApply() {
   setBusy(true);
   try {
     await downloadBackup('k808-backup-' + new Date().toISOString().replace(/[:.]/g, '-') + '.json');
@@ -273,7 +281,8 @@ $('apply').onclick = async () => {
     note(bad ? 'bad' : 'ok', bad ? `${bad} key(s) did not verify. Use "Undo unsaved" or restore from your backup.` : 'Saved. Now unplug the keyboard for 5 seconds and plug it back in.');
   } catch (e) { note('bad', 'Write failed: ' + e.message); log('Error: ' + e.message); }
   drawPad(); setBusy(false);
-};
+}
+$('apply').onclick = doApply;
 $('bfile').onchange = async ev => {
   if (!dev) return note('warn', 'Connect the keyboard first, then choose the file.');
   setBusy(true);
@@ -325,7 +334,55 @@ $('calStart').onclick = () => {
   window.addEventListener('keydown', onKey, true); ask();
 };
 
+
+// ---------- profiles (stored by physical key label) ----------
+let profiles = [];
+try { profiles = JSON.parse(localStorage.getItem('k808profiles') || '[]'); } catch (e) {}
+const saveProfiles = () => { try { localStorage.setItem('k808profiles', JSON.stringify(profiles)); } catch (e) { note('warn', 'Could not save in this browser (private mode?). Use Export.'); } };
+function keysByLabel() { const o = {}; for (const r of PHYS) if (current[r[0]] !== undefined) o[r[1]] = current[r[0]]; return o; }
+function loadProfileToEditor(pr) {
+  if (!Object.keys(original).length) { note('warn', 'Connect the keyboard first so I can load its current keys.'); return false; }
+  for (const r of PHYS) if (pr.keys[r[1]] !== undefined) current[r[0]] = pr.keys[r[1]];
+  drawPad(); drawPicker(); refreshButtons(); return true;
+}
+function drawProfiles() {
+  const box = $('plist'); box.innerHTML = '';
+  if (!profiles.length) { box.innerHTML = '<span class="mute">No profiles yet. Set your keys, type a name above, and save.</span>'; return; }
+  profiles.forEach((pr, i) => {
+    const row = document.createElement('div'); row.className = 'row'; row.style.cssText = 'align-items:center;margin:6px 0';
+    const label = document.createElement('div'); label.style.cssText = 'flex:1;min-width:140px';
+    label.innerHTML = `<b></b> <span class="mute">${PHYS.map(r => nm(pr.keys[r[1]] ?? 0xff)).join(' ')}</span>`;
+    label.querySelector('b').textContent = pr.name;
+    const mk = (t, fn, cls) => { const b = document.createElement('button'); b.textContent = t; if (cls) b.className = cls; b.onclick = fn; return b; };
+    row.append(label,
+      mk('Load into editor', () => { if (loadProfileToEditor(pr)) note('', 'Profile "' + pr.name + '" loaded. Check it, then press Apply to keyboard.'); }),
+      mk('Apply now', async () => { if (loadProfileToEditor(pr)) await doApply(); }, 'primary'),
+      mk('Delete', () => { if (confirm('Delete profile "' + pr.name + '"?')) { profiles.splice(i, 1); saveProfiles(); drawProfiles(); } }));
+    box.appendChild(row);
+  });
+}
+$('psave').onclick = () => {
+  const name = $('pname').value.trim();
+  if (!name) return note('warn', 'Type a profile name first.');
+  const pr = { name, keys: keysByLabel() }, i = profiles.findIndex(x => x.name === name);
+  if (i >= 0) profiles[i] = pr; else profiles.push(pr);
+  saveProfiles(); drawProfiles(); $('pname').value = ''; note('ok', 'Profile "' + name + '" saved.');
+};
+$('pexport').onclick = () => {
+  const blob = new Blob([JSON.stringify({ k808profiles: 1, profiles }, null, 1)], { type: 'application/json' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'k808-profiles.json'; a.click();
+};
+$('pimport').onchange = async ev => {
+  try {
+    const f = ev.target.files[0]; if (!f) return;
+    const j = JSON.parse(await f.text());
+    if (!j.profiles || !Array.isArray(j.profiles)) throw new Error('not a profiles file');
+    for (const pr of j.profiles) { if (!pr.name || !pr.keys) continue; const i = profiles.findIndex(x => x.name === pr.name); if (i >= 0) profiles[i] = pr; else profiles.push(pr); }
+    saveProfiles(); drawProfiles(); note('ok', 'Profiles imported.');
+  } catch (e) { note('bad', 'Import failed: ' + e.message); }
+};
+
 // ---------- start ----------
 if (!('hid' in navigator)) { $('support').hidden = false; $('connect').disabled = true; }
-drawPad(); drawPicker(); refreshButtons();
+drawPad(); drawPicker(); drawProfiles(); refreshButtons();
 </script></body></html>
