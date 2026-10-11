@@ -186,6 +186,19 @@ async function readBlock(addr, n) {
   await sleep(1); await send(pkt(1, 0, 0, 0, 0, 0));
   return out;
 }
+// Vendor-style session start (found in the vendor app): 07 09 41 00 ..., wait 200 ms, then one read.
+async function beginWrite() {
+  const b = new Uint8Array(featLen); b[0] = 0x09; b[1] = 0x41;
+  await send(b); await sleep(200);
+  try { await dev.receiveFeatureReport(7); } catch (e) { /* vendor reads status here; ignore */ }
+  log('Sent begin (07 09 41 00).');
+}
+async function writeByteRaw(addr, val) {
+  const lo = addr & 0xff, hi = (addr >> 8) & 0xff;
+  await send(pkt(3, 0, lo, hi, val, 0)); await sleep(2);
+  await send(pkt(9, 0, lo, hi, 0, 0)); await sleep(10);
+  await send(pkt(1, 0, lo, hi, 0, 0)); await sleep(10);
+}
 async function writeByte(addr, val) {
   const lo = addr & 0xff, hi = (addr >> 8) & 0xff;
   await send(pkt(3, 0, lo, hi, val, 0)); await sleep(2);
@@ -339,14 +352,16 @@ async function doApply() {
     saveProfiles(); drawProfiles();
     if ($('backupChk').checked && !backedUp) { await downloadBackup('k808-backup-' + new Date().toISOString().replace(/[:.]/g, '-') + '.json'); backedUp = true; }
     let bad = 0;
-    for (const r of PHYS) {
-      const k = r[0];
-      if (current[k] === original[k]) continue;
-      const got = await writeByte(T2 + k * 8, current[k]);
-      log(`Key ${r[1]} (#${k}): 0x${h2(original[k])} -> 0x${h2(current[k])} read back 0x${h2(got)}`);
-      if (got === current[k]) original[k] = got; else bad++;
-    }
+    const todo = PHYS.filter(r => current[r[0]] !== original[r[0]]);
+    await beginWrite();
+    for (const r of todo) { await writeByteRaw(T2 + r[0] * 8, current[r[0]]); log(`Wrote key ${r[1]} (#${r[0]}): 0x${h2(original[r[0]])} -> 0x${h2(current[r[0]])}`); }
     await finishWrite();
+    await sleep(500);
+    for (const r of todo) {
+      const got = (await readBlock(T2 + r[0] * 8, 1))[0];
+      log(`Check key ${r[1]}: read back 0x${h2(got)}`);
+      if (got === current[r[0]]) original[r[0]] = got; else bad++;
+    }
     note(bad ? 'bad' : 'ok', bad ? `${bad} key(s) did not verify. Use "Undo unsaved" or restore from your backup.` : 'Saved.');
   } catch (e) { note('bad', 'Write failed: ' + e.message); log('Error: ' + e.message); }
   drawPad(); setBusy(false);
