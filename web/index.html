@@ -140,13 +140,29 @@ function pkt(cmd, idx, lo, hi, data, last) {
   b[0] = 0x18; b[1] = cmd; b[2] = idx; b[3] = lo; b[4] = hi; b[5] = data; b[6] = last;
   return b;
 }
-const send = b => dev.sendFeatureReport(7, b);
+const isK808 = d => d.vendorId === 0x30fa && d.productId === 0x2350;
+// The keyboard can drop off USB for a moment while it saves (seen on real hardware), so reopen when needed.
+async function reopen(timeoutMs) {
+  const end = Date.now() + timeoutMs;
+  while (Date.now() < end) {
+    const d = (await navigator.hid.getDevices()).find(isK808);
+    if (d) { try { if (!d.opened) await d.open(); dev = d; log('Reconnected to the keyboard.'); return; } catch (e) { /* not ready yet */ } }
+    await sleep(300);
+  }
+  throw new Error('The keyboard did not come back. Unplug and replug it, then reload this page.');
+}
+async function send(b) {
+  if (!dev) throw new Error('Not connected.');
+  if (!dev.opened) await reopen(10000);
+  return dev.sendFeatureReport(7, b);
+}
 async function readBlock(addr, n) {
   const lo = addr & 0xff, hi = (addr >> 8) & 0xff, out = [];
   for (let i = 0; i < n; i++) await send(pkt(3, i, lo, hi, 0, (n - 1) & 0xff));
   await sleep(1); await send(pkt(0, 0, lo, hi, 0, 0)); await sleep(1);
   for (let i = 0; i < n; i++) {
     await send(pkt(5, i, lo, hi, 0, (n - 1) & 0xff)); await sleep(1);
+    if (!dev.opened) await reopen(10000);
     out.push((await dev.receiveFeatureReport(7)).getUint8(1));
   }
   await sleep(1); await send(pkt(1, 0, 0, 0, 0, 0));
@@ -157,6 +173,7 @@ async function writeByte(addr, val) {
   await send(pkt(3, 0, lo, hi, val, 0)); await sleep(2);
   await send(pkt(9, 0, lo, hi, 0, 0)); await sleep(10);
   await send(pkt(1, 0, lo, hi, 0, 0)); await sleep(10);
+  await sleep(400);
   return (await readBlock(addr, 1))[0];
 }
 
@@ -421,7 +438,7 @@ $('pimport').onchange = async ev => {
 
 // ---------- start ----------
 if (!('hid' in navigator)) { $('support').hidden = false; $('connect').disabled = true; }
-if ('hid' in navigator) navigator.hid.addEventListener('disconnect', e => { if (dev && e.device === dev) disconnect(true); });
+if ('hid' in navigator) navigator.hid.addEventListener('disconnect', e => { if (dev && e.device === dev) log('Keyboard dropped off USB (it may be restarting).'); });
 drawPad(); drawPicker(); drawProfiles(); refreshButtons();
 </script><script>
 (() => { const v = window.APP_VERSION; if (!v) return; document.title += " \u00b7 " + v.commit; document.querySelectorAll("h1").forEach(h => { const s = document.createElement("span"); s.className = "mute"; s.style.cssText = "font-size:.8rem;font-weight:400;margin-left:8px;color:#667085"; s.title = v.message + " (" + v.built + ")"; s.textContent = v.commit; h.appendChild(s); }); })();

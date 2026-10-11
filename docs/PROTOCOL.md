@@ -62,3 +62,6 @@ Typical read: `cmd=5` request, then `GetFeature` with first byte `7`; the answer
 ## Write session (found in vendor function 0x40fd80)
 Vendor full write: `07 09 41 00 00 00 00 00` (begin, then Sleep 200 ms) -> optional erase loop (only if a mode flag is set: `07 18 81 00 lo hi 00 60` per 0x20 bytes, Sleep 100 ms, then `07 18 00 00 00 00 00 60`) -> GetFeature(7) -> data blocks written 8 bytes at a time (cmd 3 stage, cmd 9 commit, cmd 1 end) -> **finish: `07 18 11 00 00 00 00 00`, Sleep 10 ms, `07 18 00 00 00 00 00 00`**.
 Our page never sent the finish pair, and the keyboard stopped typing after writes (until replug). The page now sends it after every write session (`finishWrite()`); there is also an "Unfreeze keyboard" button. Not yet verified on hardware.
+
+## Observed on real hardware: the keyboard drops off USB during a write
+Real-hardware error after Apply: "Cannot read properties of null (reading 'sendFeatureReport')" -> the browser fired a `disconnect` event in the middle of the write session, i.e. the keyboard re-enumerates (restarts) when the write is committed. The page now keeps the device reference, waits up to 10 s for it to reappear (`getDevices()`), reopens it, then verifies and sends the finish packets.
