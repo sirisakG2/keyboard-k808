@@ -204,6 +204,17 @@ a{color:var(--cyan)}
   </div>
 </div>
 
+<div id="rp" class="modalBg" hidden>
+  <div class="modal" style="grid-template-columns:1fr;max-width:480px">
+    <div class="mainArea" style="text-align:center">
+      <div style="font-size:3rem">&#128268;</div>
+      <h3 id="rpTitle" style="margin:6px 0">Saved! Now unplug the keyboard</h3>
+      <p id="rpText" class="mute">The keyboard only uses new keys after it restarts.<br><b>Unplug the USB cable, wait 3 seconds, plug it back in.</b><br>I'll notice and check your keys automatically.</p>
+      <button id="rpClose" class="tbtn">Close</button>
+    </div>
+  </div>
+</div>
+
 <!-- key setting dialog -->
 <div id="dlg" class="modalBg" hidden>
   <div class="modal">
@@ -489,8 +500,17 @@ async function save() {
     note(bad ? 'bad' : 'ok', bad ? `${bad} key(s) did not save. Try again, or restore your backup.` : `Saved ${todo.length} key(s) to the keyboard (${methodName()}). Unplug and replug, then press Connect: I will check that the save is still there.`);
   } catch (e) { note('bad', 'Save failed: ' + e.message); log('Error: ' + e.message); }
   setBusy(false); drawPad(); drawCfg();
-  if ($('autoDisc').checked && dev) { await disconnect(true); $('note').textContent += ' Disconnected from the page - try typing now (if keys do not type, unplug and replug once).'; }
+  if (localStorage.getItem('k808lastSaved')) { await disconnect(true); waitReplug(); }
+  else if ($('autoDisc').checked && dev) { await disconnect(true); $('note').textContent += ' Disconnected from the page.'; }
 }
+let rpWaiting = false, rpSawUnplug = false;
+function waitReplug() {
+  rpWaiting = true; rpSawUnplug = false;
+  $('rpTitle').textContent = 'Saved! Now unplug the keyboard';
+  $('rpText').innerHTML = 'The keyboard only uses new keys after it restarts.<br><b>Unplug the USB cable, wait 3 seconds, plug it back in.</b><br>I\'ll notice and check your keys automatically.';
+  $('rp').hidden = false;
+}
+$('rpClose').onclick = () => { rpWaiting = false; $('rp').hidden = true; };
 $('ok').onclick = save;
 $('cancel').onclick = () => { current = { ...original }; note('', 'Unsaved changes undone.'); drawPad(); };
 $('wake').onclick = async () => { setBusy(true); try { await finishWrite(); note('ok', 'Finish command sent. Try typing now.'); } catch (e) { note('bad', 'Failed: ' + e.message); } setBusy(false); };
@@ -697,7 +717,21 @@ $('report').onclick = async () => {
 
 // ---------- start ----------
 if (!('hid' in navigator)) { $('support').hidden = false; $('connect').disabled = true; }
-else navigator.hid.addEventListener('disconnect', e => { if (dev && e.device === dev) log('Keyboard dropped off USB (it may be restarting).'); });
+else {
+  navigator.hid.addEventListener('disconnect', e => {
+    if (dev && e.device === dev) log('Keyboard dropped off USB (it may be restarting).');
+    if (rpWaiting && isK808(e.device)) { rpSawUnplug = true; $('rpTitle').textContent = 'Unplugged - now plug it back in'; $('rpText').innerHTML = 'Waiting for the keyboard...'; }
+  });
+  navigator.hid.addEventListener('connect', async e => {
+    if (!rpWaiting || !isK808(e.device)) return;
+    rpWaiting = false;
+    $('rpTitle').textContent = 'Keyboard is back - checking...'; $('rpText').textContent = '';
+    await sleep(1500);
+    await connect();
+    $('rp').hidden = true;
+    note($('note').className.includes('bad') ? 'bad' : 'ok', $('note').textContent + ' Your new keys are active now - try them.');
+  });
+}
 if (window.APP_VERSION) { $('ver').textContent = window.APP_VERSION.commit; document.title += ' · ' + window.APP_VERSION.commit; }
 try { const m = localStorage.getItem('k808method'); if (m) $('saveMethod').value = m; } catch (e) {}
 $('saveMethod').onchange = () => { try { localStorage.setItem('k808method', $('saveMethod').value); } catch (e) {} };
